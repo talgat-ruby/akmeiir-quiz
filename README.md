@@ -1,56 +1,64 @@
-# sv
+# Akmeiir Quiz
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A quiz app for practising multiple-choice tests, made for phones and desktops. Live at
+https://akmeiir-quiz.akmeiir-quiz.workers.dev.
 
-## Creating a project
+- **Question sets** are uploaded by admins as JSON files ([format](docs/test-file-format.md)) and
+  every user sees all of them.
+- **Each attempt is set up separately:** Practice (each answer is checked right away) or Exam (the
+  score at the end), how many questions, random or in order, and an optional time limit.
+- **History per test:** best score, past attempts, and "Redo mistakes" to repeat only the questions
+  that went wrong.
+- **English, Kazakh and Russian**, light and dark theme, and it can be added to a phone's home screen.
 
-If you're seeing this, you've probably already done this step. Congrats!
+## Stack
 
-```sh
-# create a new project
-npx sv create my-app
-```
+SvelteKit 3 (Svelte 5) and TypeScript, Tailwind CSS 4, Drizzle ORM on libSQL (a local SQLite file
+in development, [Turso](https://turso.tech) in production), Better Auth (email and password),
+Paraglide (translations), Vitest and Playwright. Deployed to Cloudflare Workers.
 
-To recreate this project with the same configuration:
+## Local development
 
-```sh
-# recreate this project
-pnpm dlx sv@1.0.1 create --template minimal --types ts --add prettier eslint vitest="usages:unit,component" playwright tailwindcss="plugins:typography,forms" enhanced-img sveltekit-adapter="adapter:auto" drizzle="database:sqlite+sqlite:turso" better-auth="demo:password" mdsvex paraglide="languageTags:en, kz, ru+demo:yes" storybook ai-tools="ide:claude-code,cursor,opencode,other+delivery:plugin+tools:mcp,svelte-code-writer,svelte-core-bestpractices,svelte-file-editor+mcpSetup:remote" experimental="features:async,remoteFunctions" --install pnpm .
-```
-
-## Adding features
-
-Add features to your project with `sv add`:
-
-```sh
-npx sv add
-```
-
-For example, to add Tailwind CSS:
+Tool versions (Node, pnpm, the Turso CLI) are pinned in `.tool-versions` for [mise](https://mise.jdx.dev).
 
 ```sh
-npx sv add tailwindcss
+mise install
+pnpm install
+cp .env.example .env      # then set BETTER_AUTH_SECRET: openssl rand -base64 32
+pnpm db:migrate           # creates local.db
+pnpm db:seed              # optional: a 3-question sample test
+pnpm dev
 ```
 
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Open http://localhost:5173 and register. To upload question sets, make your account an admin:
 
 ```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
+pnpm make-admin you@example.com
 ```
 
-## Building
+## Commands
 
-To create a production version of your app:
+| Command                    | What it does                                                       |
+| -------------------------- | ------------------------------------------------------------------ |
+| `pnpm dev`                 | Development server.                                                |
+| `pnpm build`               | Production build for Cloudflare Workers.                           |
+| `pnpm check` / `pnpm lint` | Type check / formatting and lint.                                  |
+| `pnpm test:unit`           | Unit tests (repositories, file parser, passwords, translations).   |
+| `pnpm test:e2e`            | Browser tests (phone and desktop sizes) against a fresh `e2e.db`.  |
+| `pnpm db:generate`         | A new migration in `drizzle/` after changing a `*.schema.ts` file. |
+| `pnpm db:migrate`          | Apply migrations to the database in `DATABASE_URL`.                |
+| `pnpm make-admin <email>`  | Give an account the admin role.                                    |
 
-```sh
-npm run build
-```
+## Where things are
 
-You can preview the production build with `npm run preview`.
+- `src/routes/(app)/`: the signed-in pages (tests, setup, attempts, history, upload).
+- `src/routes/(auth)/`: log in, register, log out.
+- `src/lib/server/`: database repositories, auth, the question set parser, password hashing.
+- `src/lib/components/`: shared UI; design tokens are in `src/routes/layout.css`.
+- `messages/`: the UI text in `en`, `kk` and `ru`.
+- `drizzle/`: database migrations.
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+## Docs
+
+- [Question set file format](docs/test-file-format.md)
+- [Deploying](docs/deploy.md): Cloudflare Workers, Turso, secrets, and the free plan's limits.

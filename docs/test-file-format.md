@@ -41,5 +41,11 @@ example MyTestX `.mtx`) must be converted to it first.
 - Texts are trimmed. Answer order in the file doesn't matter: answers are shuffled for every attempt.
 - **No other fields are allowed.** A misspelled field (e.g. `"corect"`) is reported as an error
   instead of being silently ignored.
-- If a file has problems, the import lists every one of them with its location, e.g.
-  `question 5 › answer 1 › corect: unknown field`.
+- If a file has problems, the upload lists them with their locations, e.g.
+  `question 5 › answer 1 › corect: unknown field`. Within one object only the first unknown field
+  is reported, so a file with several extra fields may need a few rounds.
+
+## Uploading
+
+Admins upload on **Tests → Upload a question set**: drop the file on the page or choose it, up to
+5 MB. A file that passes appears in the test list for everyone. Tests can't be deleted in the app.
