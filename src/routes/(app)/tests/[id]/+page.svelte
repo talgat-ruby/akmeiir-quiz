@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { m } from '#lib/paraglide/messages.js';
 
-	let { data } = $props();
+	let { data, form } = $props();
 </script>
 
 <svelte:head>
@@ -33,6 +33,30 @@
 {/if}
 
 <form method="POST">
+	<p>
+		<label>
+			{m.setup_question_count()}
+			<input
+				type="number"
+				name="questionCount"
+				min="1"
+				max={data.test.questionCount}
+				value={form?.questionCount ?? data.defaultQuestionCount}
+				inputmode="numeric"
+				required
+			/>
+		</label>
+	</p>
+	<p>
+		<label>
+			<input type="checkbox" name="random" checked={form?.random ?? true} />
+			{m.setup_random()}
+		</label>
+	</p>
+	{#if form?.message}
+		<p role="alert">{form.message}</p>
+	{/if}
+
 	<button
 		type="submit"
 		class="mt-6 min-h-12 w-full rounded-xl bg-blue-600 px-4 text-base font-semibold text-white disabled:opacity-50"

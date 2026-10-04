@@ -101,8 +101,8 @@ describe('AttemptRepo', () => {
 	it('picks distinct random questions, capped at the test size', async () => {
 		const testId = await tests.create(fiveQuestions);
 
-		const small = await repo.start('alice', testId, 3);
-		const all = await repo.start('alice', testId, 10);
+		const small = await repo.start('alice', testId, { questionCount: 3, random: true });
+		const all = await repo.start('alice', testId, { questionCount: 10, random: true });
 
 		expect((await repo.get(small, 'alice'))?.total).toBe(3);
 		const rows = await db.select().from(attemptQuestion).where(eq(attemptQuestion.attemptId, all));
@@ -110,9 +110,23 @@ describe('AttemptRepo', () => {
 		expect(new Set(rows.map((r) => r.questionId)).size).toBe(5);
 	});
 
+	it('takes the first questions in order when random is off', async () => {
+		const testId = await tests.create(fiveQuestions);
+
+		const attemptId = await repo.start('alice', testId, { questionCount: 3, random: false });
+
+		const asked = await db
+			.select({ text: question.text })
+			.from(attemptQuestion)
+			.innerJoin(question, eq(question.id, attemptQuestion.questionId))
+			.where(eq(attemptQuestion.attemptId, attemptId))
+			.orderBy(asc(attemptQuestion.position));
+		expect(asked.map((q) => q.text)).toEqual(['Q1', 'Q2', 'Q3']);
+	});
+
 	it('stores each question’s answers in a shuffled order', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, 5);
+		const attemptId = await repo.start('alice', testId, { questionCount: 5, random: true });
 
 		for (const row of await db
 			.select()
@@ -127,7 +141,7 @@ describe('AttemptRepo', () => {
 
 	it('shows the current question without revealing correct answers', async () => {
 		const testId = await tests.create(multiChoice);
-		const attemptId = await repo.start('alice', testId, 10);
+		const attemptId = await repo.start('alice', testId, { questionCount: 10, random: true });
 
 		const current = await repo.currentQuestion(attemptId);
 
@@ -138,7 +152,7 @@ describe('AttemptRepo', () => {
 
 	it('grades answers and reveals them only after answering', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, 2);
+		const attemptId = await repo.start('alice', testId, { questionCount: 2, random: true });
 		const first = await answerIds(attemptId, 0);
 		const second = await answerIds(attemptId, 1);
 
@@ -161,7 +175,7 @@ describe('AttemptRepo', () => {
 
 	it('grades multi-select questions all-or-nothing', async () => {
 		const testId = await tests.create(multiChoice);
-		const attemptId = await repo.start('alice', testId, 1);
+		const attemptId = await repo.start('alice', testId, { questionCount: 1, random: true });
 		const { right } = await answerIds(attemptId, 0);
 
 		await repo.answer(attemptId, 0, [right[0]]);
@@ -171,7 +185,7 @@ describe('AttemptRepo', () => {
 
 	it('rejects empty, foreign and repeated answers', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, 2);
+		const attemptId = await repo.start('alice', testId, { questionCount: 2, random: true });
 		const first = await answerIds(attemptId, 0);
 		const second = await answerIds(attemptId, 1);
 		const reason = (p: Promise<unknown>) =>
@@ -189,7 +203,7 @@ describe('AttemptRepo', () => {
 
 	it('keeps attempts private to their user', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, 2);
+		const attemptId = await repo.start('alice', testId, { questionCount: 2, random: true });
 
 		expect(await repo.get(attemptId, 'bob')).toBeUndefined();
 		expect(await repo.findUnfinished('bob', testId)).toBeUndefined();
@@ -198,7 +212,7 @@ describe('AttemptRepo', () => {
 
 	it('forgets the unfinished attempt once it is finished', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, 1);
+		const attemptId = await repo.start('alice', testId, { questionCount: 1, random: true });
 		const { right } = await answerIds(attemptId, 0);
 
 		await repo.answer(attemptId, 0, right);
@@ -209,7 +223,9 @@ describe('AttemptRepo', () => {
 	it('refuses to start a test without questions', async () => {
 		const testId = await tests.create({ title: 'Empty', questions: [] });
 
-		await expect(repo.start('alice', testId, 10)).rejects.toThrow('has no questions');
+		await expect(repo.start('alice', testId, { questionCount: 10, random: true })).rejects.toThrow(
+			'has no questions'
+		);
 		expect(await db.select().from(question)).toEqual([]);
 	});
 });

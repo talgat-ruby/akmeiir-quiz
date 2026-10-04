@@ -3,6 +3,12 @@ import type { LibSQLDatabase } from 'drizzle-orm/libsql';
 import { attempt, attemptQuestion } from './attempts.schema.ts';
 import { answer, question, test } from './tests.schema.ts';
 
+/** What the user chose on the setup screen. */
+export interface AttemptSetup {
+	questionCount: number;
+	random: boolean;
+}
+
 export interface AttemptSummary {
 	id: string;
 	testId: string;
@@ -63,14 +69,17 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		this.#db = db;
 	}
 
-	/** Start an attempt with up to `questionCount` random questions; returns the attempt id. */
-	async start(userId: string, testId: string, questionCount: number): Promise<string> {
+	/**
+	 * Start an attempt with up to `questionCount` questions — a random selection in random order,
+	 * or the first ones in the set's order. Returns the attempt id.
+	 */
+	async start(userId: string, testId: string, setup: AttemptSetup): Promise<string> {
 		const picked = await this.#db
 			.select({ id: question.id })
 			.from(question)
 			.where(eq(question.testId, testId))
-			.orderBy(sql`random()`)
-			.limit(questionCount);
+			.orderBy(setup.random ? sql`random()` : asc(question.position))
+			.limit(setup.questionCount);
 		if (picked.length === 0) throw new Error(`Test ${testId} has no questions`);
 
 		const answers = await this.#db
