@@ -1,9 +1,5 @@
 import { integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
-
-const id = () =>
-	text('id')
-		.primaryKey()
-		.$defaultFn(() => crypto.randomUUID());
+import { id } from './columns.ts';
 
 export const test = sqliteTable('test', {
 	id: id(),

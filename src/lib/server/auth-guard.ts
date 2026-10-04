@@ -1,4 +1,12 @@
+import { redirect } from '@sveltejs/kit';
+
 const DEFAULT_AFTER_LOGIN = '/tests';
+
+/** The signed-in user in a protected route (the hook already redirected anonymous users). */
+export function requireUser(locals: App.Locals): NonNullable<App.Locals['user']> {
+	if (!locals.user) redirect(303, '/login');
+	return locals.user;
+}
 
 /**
  * Routes anyone may open without signing in: the `(auth)` group (login, register, logout).

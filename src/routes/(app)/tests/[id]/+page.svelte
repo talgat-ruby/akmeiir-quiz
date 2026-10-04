@@ -24,11 +24,19 @@
 	<p class="mt-3 text-sm text-gray-500">{m.question_count({ count: data.test.questionCount })}</p>
 </article>
 
-<button
-	type="button"
-	disabled
-	class="mt-6 min-h-12 w-full rounded-xl bg-blue-600 px-4 text-base font-semibold text-white disabled:opacity-50"
->
-	{m.start_test()}
-</button>
-<p class="mt-2 text-center text-sm text-gray-500">{m.start_unavailable()}</p>
+{#if data.unfinishedAttemptId}
+	<p>
+		<a href={resolve('/(app)/attempts/[id]', { id: data.unfinishedAttemptId })}>
+			{m.continue_attempt()}
+		</a>
+	</p>
+{/if}
+
+<form method="POST">
+	<button
+		type="submit"
+		class="mt-6 min-h-12 w-full rounded-xl bg-blue-600 px-4 text-base font-semibold text-white disabled:opacity-50"
+	>
+		{m.start_test()}
+	</button>
+</form>

@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/libsql';
 import { createClient } from '@libsql/client';
 import * as schema from './schema';
+import { AttemptRepo } from './attempt-repo.ts';
 import { TestRepo } from './test-repo.ts';
 import { DATABASE_URL, DATABASE_AUTH_TOKEN } from '$app/env/private';
 
@@ -12,4 +13,6 @@ const client = createClient({ url: DATABASE_URL, authToken: DATABASE_AUTH_TOKEN 
 export const db = drizzle(client, { schema });
 
 export const testRepo = new TestRepo(db);
+export const attemptRepo = new AttemptRepo(db);
 export type { NewTest, TestSummary } from './test-repo.ts';
+export { AnswerError } from './attempt-repo.ts';
