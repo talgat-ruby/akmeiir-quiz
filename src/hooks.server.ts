@@ -1,5 +1,7 @@
 import { building } from '$app/env';
+import { redirect } from '@sveltejs/kit';
 import { auth } from '#lib/server/auth.ts';
+import { isPublicRoute, loginUrl } from '#lib/server/auth-guard.ts';
 import { svelteKitHandler } from 'better-auth/svelte-kit';
 import { type Handle, sequence } from '@sveltejs/kit/hooks';
 import { getTextDirection } from '#lib/paraglide/runtime.js';
@@ -22,4 +24,12 @@ const handleBetterAuth: Handle = async ({ event, resolve }) => {
 	return svelteKitHandler({ event, resolve, auth, building });
 };
 
-export const handle: Handle = sequence(handleParaglide, handleBetterAuth);
+// Every page except the (auth) group requires a signed-in user.
+const handleAuthGuard: Handle = ({ event, resolve }) => {
+	if (!event.locals.user && !isPublicRoute(event.route.id)) {
+		redirect(303, loginUrl(event.url));
+	}
+	return resolve(event);
+};
+
+export const handle: Handle = sequence(handleParaglide, handleBetterAuth, handleAuthGuard);

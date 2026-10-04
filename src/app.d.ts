@@ -1,10 +1,13 @@
-import type { User, Session } from 'better-auth';
+import type { auth } from '#lib/server/auth.ts';
+
+// Inferred from the auth config, so plugin fields such as `user.role` are typed.
+type AuthSession = typeof auth.$Infer.Session;
 
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 declare global {
 	namespace App {
-		interface Locals { user?: User; session?: Session }
+		interface Locals { user?: AuthSession['user']; session?: AuthSession['session'] }
 
 		// interface Error {}
 		// interface PageData {}
