@@ -7,7 +7,10 @@ type AuthSession = typeof auth.$Infer.Session;
 // for information about these interfaces
 declare global {
 	namespace App {
-		interface Locals { user?: AuthSession['user']; session?: AuthSession['session'] }
+		interface Locals {
+			user?: AuthSession['user'];
+			session?: AuthSession['session'];
+		}
 
 		// interface Error {}
 		// interface PageData {}
