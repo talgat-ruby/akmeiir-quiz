@@ -27,6 +27,13 @@
 					<p class="mt-1 text-sm text-gray-500">
 						{m.question_count({ count: test.questionCount })}
 					</p>
+					{#if data.stats[test.id]}
+						{@const { bestPercent, mistakes } = data.stats[test.id]}
+						<p>
+							{#if bestPercent !== null}{m.best_score({ percent: bestPercent })} ·{/if}
+							{m.mistakes_count({ count: mistakes })}
+						</p>
+					{/if}
 				</a>
 			</li>
 		{/each}

@@ -68,5 +68,18 @@
 	"time_left": "Time left: {time}",
 	"review_title": "Mistakes",
 	"review_none": "No mistakes — well done!",
-	"review_not_answered": "Not answered"
+	"review_not_answered": "Not answered",
+	"mode_mistakes": "Mistakes — only the questions you got wrong last time ({count})",
+	"mistakes_none": "No mistakes to review yet.",
+	"action_not_allowed": "This action is not allowed for this attempt.",
+	"best_score": "Best: {percent}%",
+	"mistakes_count": "Mistakes: {count}",
+	"nav_history": "History",
+	"history_title": "History",
+	"history_empty": "No attempts yet.",
+	"history_score": "{correct} of {total} ({percent}%)",
+	"history_in_progress": "in progress ({answered} of {total} answered)",
+	"mode_name_practice": "Practice",
+	"mode_name_exam": "Exam",
+	"mode_name_mistakes": "Mistakes"
 }

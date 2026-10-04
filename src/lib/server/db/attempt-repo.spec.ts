@@ -243,7 +243,7 @@ describe('AttemptRepo', () => {
 	it('refuses to start a test without questions', async () => {
 		const testId = await tests.create({ title: 'Empty', questions: [] });
 
-		await expect(repo.start('alice', testId, practice(10))).rejects.toThrow('has no questions');
+		await expect(repo.start('alice', testId, practice(10))).rejects.toThrow('No questions to ask');
 		expect(await db.select().from(question)).toEqual([]);
 	});
 
@@ -334,6 +334,111 @@ describe('AttemptRepo', () => {
 			await repo.finishExpired(attemptId);
 			const [row] = await db.select().from(attempt).where(eq(attempt.id, attemptId));
 			expect(row.finishedAt?.getTime()).toBe(past.getTime());
+		});
+	});
+
+	describe('history and mistakes', () => {
+		const tick = () => new Promise((r) => setTimeout(r, 5));
+
+		/** Practice the first `n` questions in order, answering right where `pattern` says so. */
+		async function practiceRun(testId: string, pattern: boolean[], userId = 'alice') {
+			const attemptId = await repo.start(userId, testId, practice(pattern.length, false));
+			for (const [position, right] of pattern.entries()) {
+				const ids = await answerIds(attemptId, position);
+				await repo.answer(attemptId, position, right ? ids.right : [ids.wrong]);
+				await tick();
+			}
+			return attemptId;
+		}
+
+		const texts = async (ids: string[]) =>
+			(await db.select({ id: question.id, text: question.text }).from(question))
+				.filter((q) => ids.includes(q.id))
+				.map((q) => q.text)
+				.sort();
+
+		it('counts the latest answer per question', async () => {
+			const testId = await tests.create(fiveQuestions);
+			await practiceRun(testId, [false, false, true]); // Q1 ✗, Q2 ✗, Q3 ✓
+			await practiceRun(testId, [true, false]); //        Q1 ✓, Q2 ✗
+
+			expect(await texts(await repo.mistakeQuestionIds('alice', testId))).toEqual(['Q2']);
+		});
+
+		it('ignores an unfinished exam until it is finished', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const examId = await repo.start('alice', testId, exam(1));
+			await repo.saveExamAnswer(examId, 0, [(await answerIds(examId, 0)).wrong]);
+
+			expect(await repo.mistakeQuestionIds('alice', testId)).toEqual([]);
+			await repo.finish(examId);
+			expect(await texts(await repo.mistakeQuestionIds('alice', testId))).toEqual(['Q1']);
+		});
+
+		it('keeps each user’s mistakes separate', async () => {
+			const testId = await tests.create(fiveQuestions);
+			await practiceRun(testId, [false], 'bob');
+
+			expect(await repo.mistakeQuestionIds('alice', testId)).toEqual([]);
+		});
+
+		it('asks only the current mistakes in Mistakes mode, and clears the ones answered right', async () => {
+			const testId = await tests.create(fiveQuestions);
+			await practiceRun(testId, [false, true, false]); // Q1 ✗, Q3 ✗
+
+			const mistakesId = await repo.start('alice', testId, {
+				...practice(10),
+				mode: 'mistakes'
+			});
+			const asked = await db
+				.select({ text: question.text })
+				.from(attemptQuestion)
+				.innerJoin(question, eq(question.id, attemptQuestion.questionId))
+				.where(eq(attemptQuestion.attemptId, mistakesId));
+			expect(asked.map((q) => q.text).sort()).toEqual(['Q1', 'Q3']);
+
+			const current = await repo.currentQuestion(mistakesId);
+			const ids = await answerIds(mistakesId, current!.position);
+			await tick();
+			await repo.answer(mistakesId, current!.position, ids.right);
+			expect(await repo.mistakeQuestionIds('alice', testId)).toHaveLength(1);
+		});
+
+		it('refuses Mistakes mode when there are no mistakes', async () => {
+			const testId = await tests.create(fiveQuestions);
+
+			await expect(
+				repo.start('alice', testId, { ...practice(10), mode: 'mistakes' })
+			).rejects.toThrow('No questions to ask');
+		});
+
+		it('lists the user’s attempts newest first with their scores', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const first = await practiceRun(testId, [true, false]);
+			await tick();
+			const second = await repo.start('alice', testId, exam(3));
+			await repo.start('bob', testId, exam(1));
+
+			const history = await repo.history('alice');
+
+			expect(history.map((a) => [a.id, a.mode, a.finished, a.correct, a.total])).toEqual([
+				[second, 'exam', false, 0, 3],
+				[first, 'practice', true, 1, 2]
+			]);
+		});
+
+		it('reports the best finished score and the mistakes count per test', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const otherId = await tests.create({ ...fiveQuestions, title: 'Other' });
+			await practiceRun(testId, [true, false, false, false]); //  25%
+			await practiceRun(testId, [true, true, true, false]); //    75%, latest: Q4 ✗ only
+			await repo.start('alice', testId, exam(5)); //              unfinished: ignored
+			await repo.start('alice', testId, { ...practice(1), mode: 'mistakes' }); // not a score
+
+			expect(await repo.statsByTest('alice')).toEqual({
+				[testId]: { bestPercent: 75, mistakes: 1 }
+			});
+			expect((await repo.statsByTest('alice'))[otherId]).toBeUndefined();
 		});
 	});
 });

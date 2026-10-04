@@ -1,10 +1,14 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { m } from '#lib/paraglide/messages.js';
 import { requireUser } from '#lib/server/auth-guard.ts';
-import { attemptRepo, testRepo } from '#lib/server/db/index.ts';
+import { attemptRepo, testRepo, type AttemptMode } from '#lib/server/db/index.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const DEFAULT_QUESTION_COUNT = 10;
+
+function parseMode(value: FormDataEntryValue | null): AttemptMode {
+	return value === 'exam' || value === 'mistakes' ? value : 'practice';
+}
 const MAX_TIME_LIMIT_MINUTES = 600;
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -16,12 +20,14 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		test,
 		defaultQuestionCount: Math.min(DEFAULT_QUESTION_COUNT, test.questionCount),
 		maxTimeLimitMinutes: MAX_TIME_LIMIT_MINUTES,
+		mistakesCount: (await attemptRepo.mistakeQuestionIds(user.id, test.id)).length,
 		unfinishedAttemptId: (await attemptRepo.findUnfinished(user.id, test.id)) ?? null
 	};
 };
 
 export const actions: Actions = {
 	// The setup form: mode, time limit (exam only), how many questions, random or in order.
+	// Mistakes mode asks at most the user's current mistakes.
 	default: async ({ params, locals, request }) => {
 		const user = requireUser(locals);
 		const test = await testRepo.get(params.id);
@@ -29,7 +35,7 @@ export const actions: Actions = {
 
 		const form = await request.formData();
 		const values = {
-			mode: form.get('mode') === 'exam' ? ('exam' as const) : ('practice' as const),
+			mode: parseMode(form.get('mode')),
 			questionCount: String(form.get('questionCount') ?? '').trim(),
 			random: form.get('random') === 'on',
 			timeLimitMinutes: String(form.get('timeLimitMinutes') ?? '').trim()
@@ -42,6 +48,13 @@ export const actions: Actions = {
 			questionCount > test.questionCount
 		) {
 			return fail(400, { ...values, message: m.setup_count_invalid({ max: test.questionCount }) });
+		}
+
+		if (
+			values.mode === 'mistakes' &&
+			(await attemptRepo.mistakeQuestionIds(user.id, test.id)).length === 0
+		) {
+			return fail(400, { ...values, message: m.mistakes_none() });
 		}
 
 		let timeLimitMinutes: number | null = null;

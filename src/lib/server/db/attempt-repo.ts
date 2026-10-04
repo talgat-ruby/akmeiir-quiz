@@ -9,6 +9,7 @@ import {
 	isNull,
 	isNotNull,
 	lte,
+	ne,
 	not,
 	or,
 	sql
@@ -33,11 +34,20 @@ export interface AttemptSummary {
 	testId: string;
 	testTitle: string;
 	mode: AttemptMode;
+	startedAt: Date;
 	deadlineAt: Date | null;
 	finished: boolean;
 	total: number;
 	answered: number;
 	correct: number;
+}
+
+/** The user's track record on one test, for the test list. */
+export interface TestStats {
+	/** Best score of a finished practice or exam attempt, in percent; null if none yet. */
+	bestPercent: number | null;
+	/** Questions whose latest seen answer was wrong — what Mistakes mode would ask. */
+	mistakes: number;
 }
 
 /** A question before grading is shown: no information about which answers are correct. */
@@ -100,16 +110,21 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 
 	/**
 	 * Start an attempt with up to `questionCount` questions — a random selection in random order,
-	 * or the first ones in the set's order. Returns the attempt id.
+	 * or the first ones in the set's order. Mistakes mode only picks the user's current mistakes.
+	 * Returns the attempt id.
 	 */
 	async start(userId: string, testId: string, setup: AttemptSetup): Promise<string> {
+		const pool =
+			setup.mode === 'mistakes'
+				? inArray(question.id, await this.mistakeQuestionIds(userId, testId))
+				: undefined;
 		const picked = await this.#db
 			.select({ id: question.id })
 			.from(question)
-			.where(eq(question.testId, testId))
+			.where(and(eq(question.testId, testId), pool))
 			.orderBy(setup.random ? sql`random()` : asc(question.position))
 			.limit(setup.questionCount);
-		if (picked.length === 0) throw new Error(`Test ${testId} has no questions`);
+		if (picked.length === 0) throw new Error(`No questions to ask in test ${testId}`);
 
 		const answers = await this.#db
 			.select({ id: answer.id, questionId: answer.questionId })
@@ -145,27 +160,54 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 
 	/** The user's attempt with progress counts; undefined if missing or someone else's. */
 	async get(attemptId: string, userId: string): Promise<AttemptSummary | undefined> {
-		const [row] = await this.#db
+		const [summary] = await this.#summaries().where(
+			and(eq(attempt.id, attemptId), eq(attempt.userId, userId))
+		);
+		return summary && withFinished(summary);
+	}
+
+	/** All of the user's attempts, newest first. */
+	async history(userId: string): Promise<AttemptSummary[]> {
+		const rows = await this.#summaries()
+			.where(eq(attempt.userId, userId))
+			.orderBy(desc(attempt.startedAt));
+		return rows.map(withFinished);
+	}
+
+	/** Questions of a test whose latest seen answer by the user was wrong. */
+	async mistakeQuestionIds(userId: string, testId: string): Promise<string[]> {
+		return latestMistakes(await this.#seenAnswers(userId, testId)).get(testId) ?? [];
+	}
+
+	/** Best score and mistakes count for every test the user has tried, keyed by test id. */
+	async statsByTest(userId: string): Promise<Record<string, TestStats>> {
+		const finished = await this.#db
 			.select({
-				id: attempt.id,
 				testId: attempt.testId,
-				testTitle: test.title,
-				mode: attempt.mode,
-				deadlineAt: attempt.deadlineAt,
-				finishedAt: attempt.finishedAt,
 				total: count(attemptQuestion.position),
-				answered: count(attemptQuestion.answeredAt),
 				correct: sql<number>`coalesce(sum(${attemptQuestion.correct}), 0)`.mapWith(Number)
 			})
 			.from(attempt)
-			.innerJoin(test, eq(test.id, attempt.testId))
-			.leftJoin(attemptQuestion, eq(attemptQuestion.attemptId, attempt.id))
-			.where(and(eq(attempt.id, attemptId), eq(attempt.userId, userId)))
+			.innerJoin(attemptQuestion, eq(attemptQuestion.attemptId, attempt.id))
+			.where(
+				and(
+					eq(attempt.userId, userId),
+					isNotNull(attempt.finishedAt),
+					ne(attempt.mode, 'mistakes') // a re-quiz of mistakes isn't a fair score
+				)
+			)
 			.groupBy(attempt.id);
-		if (!row) return undefined;
+		const mistakes = latestMistakes(await this.#seenAnswers(userId));
 
-		const { finishedAt, ...summary } = row;
-		return { ...summary, finished: finishedAt !== null };
+		const stats: Record<string, TestStats> = {};
+		const statsFor = (testId: string) => (stats[testId] ??= { bestPercent: null, mistakes: 0 });
+		for (const { testId, total, correct } of finished) {
+			const percent = Math.round((correct / total) * 100);
+			const s = statsFor(testId);
+			s.bestPercent = Math.max(s.bestPercent ?? 0, percent);
+		}
+		for (const [testId, ids] of mistakes) statsFor(testId).mistakes = ids.length;
+		return stats;
 	}
 
 	/** The user's most recent attempt on a test that can still be continued, if any. */
@@ -341,6 +383,52 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		return { selectedAnswerIds: selected, correct: sameAnswers(selected, correctIds) };
 	}
 
+	/** Attempts with their test title and progress counts; callers add the `where`. */
+	#summaries() {
+		return this.#db
+			.select({
+				id: attempt.id,
+				testId: attempt.testId,
+				testTitle: test.title,
+				mode: attempt.mode,
+				startedAt: attempt.startedAt,
+				deadlineAt: attempt.deadlineAt,
+				finishedAt: attempt.finishedAt,
+				total: count(attemptQuestion.position),
+				answered: count(attemptQuestion.answeredAt),
+				correct: sql<number>`coalesce(sum(${attemptQuestion.correct}), 0)`.mapWith(Number)
+			})
+			.from(attempt)
+			.innerJoin(test, eq(test.id, attempt.testId))
+			.leftJoin(attemptQuestion, eq(attemptQuestion.attemptId, attempt.id))
+			.groupBy(attempt.id)
+			.$dynamic();
+	}
+
+	/**
+	 * The user's answers whose result they have seen, oldest first: practice and mistakes answers
+	 * right away, exam answers once the exam is finished.
+	 */
+	#seenAnswers(userId: string, testId?: string) {
+		return this.#db
+			.select({
+				testId: attempt.testId,
+				questionId: attemptQuestion.questionId,
+				correct: attemptQuestion.correct
+			})
+			.from(attemptQuestion)
+			.innerJoin(attempt, eq(attempt.id, attemptQuestion.attemptId))
+			.where(
+				and(
+					eq(attempt.userId, userId),
+					testId === undefined ? undefined : eq(attempt.testId, testId),
+					isNotNull(attemptQuestion.answeredAt),
+					or(isNotNull(attempt.finishedAt), ne(attempt.mode, 'exam'))
+				)
+			)
+			.orderBy(asc(attemptQuestion.answeredAt));
+	}
+
 	/** Question rows of attempts; callers add the full `where`. */
 	#questionRows() {
 		return this.#db
@@ -389,6 +477,27 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		const byId = new Map(answers.map((a) => [a.id, a]));
 		return order.flatMap((id) => byId.get(id) ?? []);
 	}
+}
+
+function withFinished({
+	finishedAt,
+	...summary
+}: Omit<AttemptSummary, 'finished'> & { finishedAt: Date | null }): AttemptSummary {
+	return { ...summary, finished: finishedAt !== null };
+}
+
+/** For each test, the questions whose latest answer (rows come oldest first) was wrong. */
+function latestMistakes(
+	answers: { testId: string; questionId: string; correct: boolean | null }[]
+): Map<string, string[]> {
+	const latest = new Map<string, (typeof answers)[number]>();
+	for (const a of answers) latest.set(a.questionId, a);
+
+	const byTest = new Map<string, string[]>();
+	for (const a of latest.values()) {
+		if (a.correct === false) byTest.set(a.testId, [...(byTest.get(a.testId) ?? []), a.questionId]);
+	}
+	return byTest;
 }
 
 interface QuestionRow {

@@ -20,7 +20,7 @@ async function loadAttempt({ params, locals }: Pick<RequestEvent, 'params' | 'lo
 }
 
 /**
- * Practice: `?q=<n>` on an answered question shows its feedback, otherwise the first
+ * Practice and Mistakes: `?q=<n>` on an answered question shows its feedback, otherwise the first
  * unanswered question, and the results once everything is answered.
  *
  * Exam: any question (`?q=<n>`, default the first unanswered) with the saved answer,
@@ -30,7 +30,7 @@ export const load: PageServerLoad = async (event) => {
 	const attempt = await loadAttempt(event);
 	const q = questionNumber(event.url);
 
-	if (attempt.mode === 'practice') {
+	if (attempt.mode !== 'exam') {
 		if (q !== null) {
 			const answered = await attemptRepo.answeredQuestion(attempt.id, q - 1);
 			if (answered) return { attempt, view: 'feedback' as const, answered };
@@ -66,9 +66,10 @@ function readAnswer(form: FormData) {
 }
 
 export const actions: Actions = {
-	// Practice: grade one answer and show its feedback.
+	// Practice and Mistakes: grade one answer and show its feedback.
 	answer: async (event) => {
 		const attempt = await loadAttempt(event);
+		if (attempt.mode === 'exam') error(400, m.action_not_allowed());
 		const { position, selected } = readAnswer(await event.request.formData());
 
 		try {
@@ -84,6 +85,7 @@ export const actions: Actions = {
 	// Exam: save (or change) an answer without feedback, then go to the next question.
 	save: async (event) => {
 		const attempt = await loadAttempt(event);
+		if (attempt.mode !== 'exam') error(400, m.action_not_allowed());
 		const { position, selected } = readAnswer(await event.request.formData());
 
 		try {
@@ -100,6 +102,7 @@ export const actions: Actions = {
 	// Exam: hand it in.
 	finish: async (event) => {
 		const attempt = await loadAttempt(event);
+		if (attempt.mode !== 'exam') error(400, m.action_not_allowed());
 		await attemptRepo.finish(attempt.id);
 		redirect(303, `/attempts/${attempt.id}`);
 	}

@@ -3,7 +3,7 @@ import { user } from './auth.schema.ts';
 import { id } from './columns.ts';
 import { question, test } from './tests.schema.ts';
 
-export const ATTEMPT_MODES = ['practice', 'exam'] as const;
+export const ATTEMPT_MODES = ['practice', 'exam', 'mistakes'] as const;
 export type AttemptMode = (typeof ATTEMPT_MODES)[number];
 
 /** One run through a test by one user. Unfinished while `finishedAt` is null. */
