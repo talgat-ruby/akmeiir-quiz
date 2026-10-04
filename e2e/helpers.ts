@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { E2E_DATABASE_URL } from './env.ts';
 
 export const PASSWORD = 'correct-horse-1';
@@ -37,10 +37,18 @@ export async function startSampleTest(
 ): Promise<void> {
 	await page.goto('/tests');
 	await page.getByRole('link', { name: /Sample test/ }).click();
-	await page.getByLabel(new RegExp(`${mode} —`)).check();
+	await page.getByRole('radio', { name: new RegExp(`^${mode}`) }).check();
 	if (timeLimit !== undefined) await page.getByLabel(/Time limit/).fill(String(timeLimit));
 	await page.getByLabel('Number of questions').fill(String(count));
 	await page.getByLabel(/Random questions/).uncheck();
 	await page.getByRole('button', { name: 'Start' }).click();
 	await expect(page).toHaveURL(/\/attempts\//);
+}
+
+/**
+ * Text that is on screen. Some things are in the page twice, once for the phone layout and
+ * once for desktop, with the other one hidden; getByText alone would find both.
+ */
+export function visibleText(page: Page, text: string, options?: { exact?: boolean }): Locator {
+	return page.getByText(text, options).filter({ visible: true });
 }

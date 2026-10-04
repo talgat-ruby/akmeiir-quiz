@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import Alert from '#lib/components/Alert.svelte';
 	import FormField from '#lib/components/FormField.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 
@@ -13,11 +14,11 @@
 	<title>{m.login_title()} · {m.app_name()}</title>
 </svelte:head>
 
-<h1 class="mb-4 text-xl font-bold">{m.login_title()}</h1>
+<h1 class="text-2xl/[30px] font-bold">{m.login_title()}</h1>
 
 <form
 	method="POST"
-	class="space-y-4"
+	class="flex flex-col gap-4"
 	use:enhance={() => {
 		submitting = true;
 		return async ({ update }) => {
@@ -44,21 +45,17 @@
 	/>
 
 	{#if form?.message}
-		<p role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-700">{form.message}</p>
+		<Alert>{form.message}</Alert>
 	{/if}
 
-	<button
-		type="submit"
-		disabled={submitting}
-		class="min-h-12 w-full rounded-xl bg-blue-600 px-4 text-base font-semibold text-white active:bg-blue-700 disabled:opacity-60"
-	>
+	<button type="submit" disabled={submitting} class="btn w-full btn-primary">
 		{m.login_submit()}
 	</button>
 </form>
 
-<p class="mt-4 text-center text-sm text-gray-600">
+<p class="text-center text-sm text-muted">
 	{m.no_account()}
-	<a href={resolve('/(auth)/register') + page.url.search} class="font-medium text-blue-700">
+	<a href={resolve('/(auth)/register') + page.url.search} class="font-semibold text-link">
 		{m.register_link()}
 	</a>
 </p>

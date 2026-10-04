@@ -8,25 +8,22 @@ test('the interface is English by default and switches to Russian and Kazakh', a
 
 	// The switcher needs JavaScript, so wait for the page to finish loading first.
 	await page.waitForLoadState('networkidle');
-	await page.getByRole('button', { name: 'Русский' }).click();
+	await page.getByRole('combobox', { name: 'Language' }).selectOption('Русский');
 	await expect(page.getByRole('heading', { name: 'Тесты' })).toBeVisible();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'ru');
-	await expect(page.getByRole('button', { name: 'Русский' })).toHaveAttribute(
-		'aria-pressed',
-		'true'
-	);
+	await expect(page.getByRole('combobox', { name: 'Язык' })).toHaveValue('ru');
 
 	// The choice sticks across pages.
 	await page.getByRole('link', { name: /Sample test/ }).click();
 	await expect(page.getByRole('button', { name: 'Начать' })).toBeVisible();
 
 	await page.waitForLoadState('networkidle');
-	await page.getByRole('button', { name: 'Қазақша' }).click();
+	await page.getByRole('combobox', { name: 'Язык' }).selectOption('Қазақша');
 	await expect(page.getByRole('button', { name: 'Бастау' })).toBeVisible();
 	await expect(page.locator('html')).toHaveAttribute('lang', 'kk');
 
 	await page.waitForLoadState('networkidle');
-	await page.getByRole('button', { name: 'English' }).click();
+	await page.getByRole('combobox', { name: 'Тіл' }).selectOption('English');
 	await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
 });
 

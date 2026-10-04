@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { locales, localizeHref } from '#lib/paraglide/runtime.js';
+	import '@fontsource-variable/ibm-plex-sans';
 	import './layout.css';
 	import favicon from '#lib/assets/favicon.svg';
 

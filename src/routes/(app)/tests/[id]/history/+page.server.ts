@@ -1,7 +1,7 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { m } from '#lib/paraglide/messages.js';
 import { requireUser } from '#lib/server/auth-guard.ts';
-import { attemptRepo, testRepo, type RedoScope } from '#lib/server/db/index.ts';
+import { attemptRepo, testRepo } from '#lib/server/db/index.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async ({ params, locals }) => {
@@ -13,13 +13,12 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 };
 
 export const actions: Actions = {
-	// Start a new attempt from a past one: all of its questions, or only its mistakes.
+	// Start a new attempt with only the questions a past attempt got wrong or left unanswered.
 	redo: async ({ locals, request }) => {
 		const user = requireUser(locals);
 		const form = await request.formData();
-		const scope: RedoScope = form.get('scope') === 'mistakes' ? 'mistakes' : 'all';
 
-		const attemptId = await attemptRepo.redo(user.id, String(form.get('attemptId')), scope);
+		const attemptId = await attemptRepo.redoMistakes(user.id, String(form.get('attemptId')));
 		if (!attemptId) return fail(400, { message: m.redo_nothing() });
 		redirect(303, `/attempts/${attemptId}`);
 	}

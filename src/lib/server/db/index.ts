@@ -15,4 +15,4 @@ export const db = drizzle(client, { schema });
 export const testRepo = new TestRepo(db);
 export const attemptRepo = new AttemptRepo(db);
 export type { NewTest, TestSummary } from './test-repo.ts';
-export { AnswerError, type AttemptMode, type RedoScope, type TestStats } from './attempt-repo.ts';
+export { AnswerError, type AttemptMode, type TestStats } from './attempt-repo.ts';

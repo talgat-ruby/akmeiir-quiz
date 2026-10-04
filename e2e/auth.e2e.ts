@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { PASSWORD, register } from './helpers.ts';
+import { PASSWORD, register, visibleText } from './helpers.ts';
 
 test('signed-out visitors are sent to log in, then back to where they were going', async ({
 	page
@@ -11,7 +11,7 @@ test('signed-out visitors are sent to log in, then back to where they were going
 
 test('register, log out, and log back in', async ({ page }) => {
 	const email = await register(page, 'Aigerim');
-	await expect(page.getByText('Aigerim')).toBeVisible();
+	await expect(visibleText(page, 'Aigerim')).toBeVisible();
 
 	await page.getByRole('button', { name: 'Log out' }).click();
 	await expect(page).toHaveURL(/\/login$/);

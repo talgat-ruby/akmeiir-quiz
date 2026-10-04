@@ -74,15 +74,6 @@ export class TestRepo<TSchema extends Record<string, unknown>> {
 		return summary;
 	}
 
-	/**
-	 * Delete a test. Foreign keys cascade to its questions and answers and to everyone's
-	 * attempts on it. Returns false if there was no such test.
-	 */
-	async delete(id: string): Promise<boolean> {
-		const deleted = await this.#db.delete(test).where(eq(test.id, id)).returning({ id: test.id });
-		return deleted.length > 0;
-	}
-
 	#summaries() {
 		return this.#db
 			.select({

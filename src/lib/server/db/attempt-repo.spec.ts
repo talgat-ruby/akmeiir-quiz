@@ -159,11 +159,11 @@ describe('AttemptRepo', () => {
 		}
 	});
 
-	it('shows the current question without revealing correct answers', async () => {
+	it('shows a question without revealing correct answers', async () => {
 		const testId = await tests.create(multiChoice);
 		const attemptId = await repo.start('alice', testId, practice(10));
 
-		const current = await repo.currentQuestion(attemptId);
+		const current = await repo.question(attemptId, 0);
 
 		expect(current).toMatchObject({ position: 0, text: 'Primary colors?', multiple: true });
 		expect(current?.answers).toHaveLength(3);
@@ -177,20 +177,26 @@ describe('AttemptRepo', () => {
 		const second = await answerIds(attemptId, 1);
 
 		expect(await repo.answeredQuestion(attemptId, 0)).toBeUndefined();
-		expect(await repo.answer(attemptId, 0, first.right)).toEqual({ finished: false });
-		expect(await repo.answer(attemptId, 1, [second.wrong])).toEqual({ finished: true });
+		await repo.answer(attemptId, 0, first.right);
+		await repo.answer(attemptId, 1, [second.wrong]);
 
 		const review = await repo.answeredQuestion(attemptId, 1);
 		expect(review?.correct).toBe(false);
 		expect(review?.answers.find((a) => a.selected)?.id).toBe(second.wrong);
 		expect(review?.answers.filter((a) => a.correct).map((a) => a.id)).toEqual(second.right);
+		expect(await repo.questionList(attemptId, true)).toEqual([
+			{ position: 0, answered: true, correct: true },
+			{ position: 1, answered: true, correct: false }
+		]);
+		// Practice doesn't finish by itself: the user presses Finish.
+		expect(await repo.get(attemptId, 'alice')).toMatchObject({ finished: false, answered: 2 });
+		await repo.finish(attemptId);
 		expect(await repo.get(attemptId, 'alice')).toMatchObject({
 			finished: true,
 			total: 2,
 			answered: 2,
 			correct: 1
 		});
-		expect(await repo.currentQuestion(attemptId)).toBeUndefined();
 	});
 
 	it('grades multi-select questions all-or-nothing', async () => {
@@ -236,8 +242,22 @@ describe('AttemptRepo', () => {
 		const { right } = await answerIds(attemptId, 0);
 
 		await repo.answer(attemptId, 0, right);
+		expect(await repo.findUnfinished('alice', testId)).toBe(attemptId);
 
+		await repo.finish(attemptId);
 		expect(await repo.findUnfinished('alice', testId)).toBeUndefined();
+	});
+
+	it('refuses practice answers once the time is up', async () => {
+		const testId = await tests.create(fiveQuestions);
+		const attemptId = await repo.start('alice', testId, { ...practice(2), timeLimitMinutes: 1 });
+		const { right } = await answerIds(attemptId, 0);
+		await db
+			.update(attempt)
+			.set({ deadlineAt: new Date(Date.now() - 1000) })
+			.where(eq(attempt.id, attemptId));
+
+		await expect(repo.answer(attemptId, 0, right)).rejects.toMatchObject({ reason: 'closed' });
 	});
 
 	it('refuses to start a test without questions', async () => {
@@ -248,7 +268,7 @@ describe('AttemptRepo', () => {
 	});
 
 	describe('exam', () => {
-		it('stores the mode and a deadline only when there is a time limit', async () => {
+		it('stores the mode, and a deadline whenever there is a time limit', async () => {
 			const testId = await tests.create(fiveQuestions);
 
 			const timed = await repo.get(await repo.start('alice', testId, exam(2, 30)), 'alice');
@@ -263,7 +283,8 @@ describe('AttemptRepo', () => {
 			expect(minutesLeft).toBeGreaterThan(29);
 			expect(minutesLeft).toBeLessThanOrEqual(30);
 			expect(untimed?.deadlineAt).toBeNull();
-			expect(practiceRun).toMatchObject({ mode: 'practice', deadlineAt: null });
+			expect(practiceRun?.mode).toBe('practice');
+			expect(practiceRun?.deadlineAt).toBeInstanceOf(Date);
 		});
 
 		it('lets answers change until the end, keeping grades hidden', async () => {
@@ -274,10 +295,10 @@ describe('AttemptRepo', () => {
 			await repo.saveExamAnswer(attemptId, 0, [first.wrong]);
 			await repo.saveExamAnswer(attemptId, 0, first.right);
 
-			const shown = await repo.examQuestion(attemptId, 0);
+			const shown = await repo.question(attemptId, 0);
 			expect(shown?.selected).toEqual(first.right);
 			for (const a of shown!.answers) expect(Object.keys(a).sort()).toEqual(['id', 'text']);
-			expect(await repo.questionList(attemptId)).toEqual([
+			expect(await repo.questionList(attemptId, false)).toEqual([
 				{ position: 0, answered: true },
 				{ position: 1, answered: false }
 			]);
@@ -347,6 +368,7 @@ describe('AttemptRepo', () => {
 				const ids = await answerIds(attemptId, position);
 				await repo.answer(attemptId, position, right ? ids.right : [ids.wrong]);
 			}
+			await repo.finish(attemptId);
 			return attemptId;
 		}
 
@@ -377,32 +399,6 @@ describe('AttemptRepo', () => {
 			]);
 		});
 
-		it('redoes all questions in the same order and mode', async () => {
-			const testId = await tests.create(fiveQuestions);
-			const source = await repo.start('alice', testId, practice(3));
-			const redoId = await repo.redo('alice', source, 'all');
-
-			expect(await asked(redoId!)).toEqual(await asked(source));
-			expect(await repo.get(redoId!, 'alice')).toMatchObject({
-				mode: 'practice',
-				finished: false,
-				answered: 0
-			});
-		});
-
-		it('keeps an exam’s time limit when redoing it', async () => {
-			const testId = await tests.create(fiveQuestions);
-			const source = await repo.start('alice', testId, exam(2, 15));
-			await repo.finish(source);
-
-			const redo = await repo.get((await repo.redo('alice', source, 'all'))!, 'alice');
-
-			expect(redo?.mode).toBe('exam');
-			const minutesLeft = (redo!.deadlineAt!.getTime() - Date.now()) / 60_000;
-			expect(minutesLeft).toBeGreaterThan(14);
-			expect(minutesLeft).toBeLessThanOrEqual(15);
-		});
-
 		it('redoes only the wrong and unanswered questions, with feedback', async () => {
 			const testId = await tests.create(fiveQuestions);
 			const source = await repo.start('alice', testId, exam(3));
@@ -410,20 +406,26 @@ describe('AttemptRepo', () => {
 			await repo.saveExamAnswer(source, 1, [(await answerIds(source, 1)).wrong]);
 			await repo.finish(source); // Q3 left unanswered
 
-			const redoId = await repo.redo('alice', source, 'mistakes');
+			const redoId = await repo.redoMistakes('alice', source);
 
 			expect(await asked(redoId!)).toEqual(['Q2', 'Q3']);
-			expect((await repo.get(redoId!, 'alice'))?.mode).toBe('mistakes');
-			expect((await repo.currentQuestion(redoId!))?.text).toBe('Q2');
+			expect(await repo.get(redoId!, 'alice')).toMatchObject({
+				mode: 'mistakes',
+				deadlineAt: null
+			});
+			expect((await repo.question(redoId!, 0))?.text).toBe('Q2');
 		});
 
 		it('has nothing to redo without mistakes, or on someone else’s attempt', async () => {
 			const testId = await tests.create(fiveQuestions);
 			const perfect = await practiceRun(testId, [true, true]);
 
-			expect(await repo.redo('alice', perfect, 'mistakes')).toBeUndefined();
-			expect(await repo.redo('bob', perfect, 'all')).toBeUndefined();
-			expect(await repo.redo('alice', 'missing', 'all')).toBeUndefined();
+			const weak = await practiceRun(testId, [false]);
+
+			expect(await repo.redoMistakes('alice', perfect)).toBeUndefined();
+			expect(await repo.redoMistakes('bob', weak)).toBeUndefined();
+			expect(await repo.redoMistakes('alice', 'missing')).toBeUndefined();
+			expect(await repo.redoMistakes('alice', weak)).toBeDefined();
 		});
 
 		it('reports the best finished practice or exam score per test', async () => {
@@ -432,10 +434,11 @@ describe('AttemptRepo', () => {
 			const weak = await practiceRun(testId, [true, false, false, false]); // 25%
 			await practiceRun(testId, [true, true, true, false]); //               75%
 			await repo.start('alice', testId, exam(5)); //                           unfinished
-			const redoId = await repo.redo('alice', weak, 'mistakes'); //            a redo isn't a score
+			const redoId = await repo.redoMistakes('alice', weak); //                a redo isn't a score
 			for (const position of [0, 1, 2]) {
 				await repo.answer(redoId!, position, (await answerIds(redoId!, position)).right);
 			}
+			await repo.finish(redoId!);
 
 			const stats = await repo.statsByTest('alice');
 

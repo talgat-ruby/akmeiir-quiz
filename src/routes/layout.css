@@ -1,3 +1,262 @@
 @import 'tailwindcss';
-@plugin '@tailwindcss/forms';
+/* Form controls are styled here (field, switch) and with accent-color, not by the plugin's resets. */
+@plugin '@tailwindcss/forms' {
+	strategy: 'class';
+}
 @plugin '@tailwindcss/typography';
+
+/*
+ * Design tokens ("calm study sheet"): a grey ground, white cards and one indigo accent.
+ * Green and red are kept for answer feedback, always together with ✓/✗ and a label.
+ * Each token is a CSS variable, so the dark theme below only swaps the values.
+ */
+@theme {
+	--font-sans: 'IBM Plex Sans Variable', 'IBM Plex Sans', system-ui, sans-serif;
+
+	--color-ground: #f5f6f8;
+	--color-surface: #ffffff;
+	--color-ink: #111827;
+	--color-ink-soft: #374151;
+	--color-muted: #5b6472;
+	--color-line: #e3e6eb;
+	--color-line-strong: #cdd2da;
+	--color-track: #e9ebef;
+	--color-link: #4338ca;
+
+	--color-primary: #4338ca;
+	--color-primary-hover: #3730a3;
+	--color-primary-soft: #eef0ff;
+	--color-primary-soft-line: #c9cdf8;
+	--color-on-primary-soft: #3730a3;
+	/* Text on the filled colors: primary, correct-strong and wrong-strong. */
+	--color-on-accent: #ffffff;
+
+	--color-correct: #166534;
+	--color-correct-strong: #166534;
+	--color-correct-line: #1f8a4c;
+	--color-correct-soft: #eaf6ee;
+	--color-correct-soft-line: #9fd5ae;
+
+	--color-wrong: #b42318;
+	--color-wrong-strong: #b42318;
+	--color-wrong-line: #d93a2b;
+	--color-wrong-soft: #fdedec;
+	--color-wrong-soft-line: #f2b8b5;
+
+	--color-attention: #92400e;
+	--color-attention-soft: #fef3c7;
+	--color-attention-line: #f5d08a;
+
+	--color-chip: #eef1f5;
+	--color-on-chip: #334155;
+}
+
+@layer base {
+	:root {
+		color-scheme: light dark;
+		-webkit-tap-highlight-color: transparent;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--color-ground: #0e1116;
+			--color-surface: #161a21;
+			--color-ink: #e7eaee;
+			--color-ink-soft: #c3c9d2;
+			--color-muted: #9aa3af;
+			--color-line: #262c36;
+			--color-line-strong: #3a414d;
+			--color-track: #262c36;
+			--color-link: #a5abff;
+
+			--color-primary: #8b93ff;
+			--color-primary-hover: #a5abff;
+			--color-primary-soft: #262a52;
+			--color-primary-soft-line: #3b4180;
+			--color-on-primary-soft: #c7cbff;
+			--color-on-accent: #0e1116;
+
+			--color-correct: #6ee7a0;
+			--color-correct-strong: #22c55e;
+			--color-correct-line: #22c55e;
+			--color-correct-soft: #10301d;
+			--color-correct-soft-line: #1e5b37;
+
+			--color-wrong: #fca5a5;
+			--color-wrong-strong: #f87171;
+			--color-wrong-line: #f87171;
+			--color-wrong-soft: #3a1414;
+			--color-wrong-soft-line: #7f2a2a;
+
+			--color-attention: #fcd34d;
+			--color-attention-soft: #3a2c0a;
+			--color-attention-line: #7a5a14;
+
+			--color-chip: #262c36;
+			--color-on-chip: #c3c9d2;
+		}
+	}
+
+	/* viewport-fit=cover: keep content clear of a phone's notch in landscape. */
+	body {
+		padding-right: env(safe-area-inset-right);
+		padding-left: env(safe-area-inset-left);
+		background-color: var(--color-ground);
+		color: var(--color-ink);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+	}
+
+	:focus-visible {
+		outline: 2px solid var(--color-primary);
+		outline-offset: 2px;
+	}
+}
+
+/* A white panel with a hairline border. */
+@utility card {
+	border: 1px solid var(--color-line);
+	border-radius: 1rem;
+	background-color: var(--color-surface);
+}
+
+/*
+ * Buttons (and links that look like buttons): btn or btn-sm for the size, plus one color.
+ * Hover only where there is a pointer, so a tap on a phone doesn't leave a button highlighted.
+ */
+@utility btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 0.375rem;
+	min-height: 3.25rem;
+	padding: 0.5rem 1rem;
+	border-width: 1px;
+	border-radius: 0.875rem;
+	font-size: 1rem;
+	font-weight: 600;
+	line-height: 1.25rem;
+	text-align: center;
+	cursor: pointer;
+	transition-property: background-color, border-color, color;
+	transition-duration: 150ms;
+
+	&:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+}
+
+@utility btn-sm {
+	@apply btn;
+	min-height: 2.75rem;
+	padding: 0.375rem 0.875rem;
+	border-radius: 0.75rem;
+	font-size: 0.9375rem;
+}
+
+@utility btn-primary {
+	border-color: var(--color-primary);
+	background-color: var(--color-primary);
+	color: var(--color-on-accent);
+
+	@media (hover: hover) {
+		&:hover:not(:disabled) {
+			border-color: var(--color-primary-hover);
+			background-color: var(--color-primary-hover);
+		}
+	}
+}
+
+@utility btn-secondary {
+	border-color: var(--color-line-strong);
+	background-color: var(--color-surface);
+	color: var(--color-ink);
+
+	@media (hover: hover) {
+		&:hover:not(:disabled) {
+			background-color: var(--color-ground);
+		}
+	}
+}
+
+@utility btn-soft {
+	border-color: transparent;
+	background-color: var(--color-primary-soft);
+	color: var(--color-on-primary-soft);
+}
+
+@utility btn-ghost {
+	border-color: transparent;
+	background-color: transparent;
+	color: var(--color-ink);
+
+	@media (hover: hover) {
+		&:hover {
+			background-color: var(--color-ground);
+		}
+	}
+}
+
+/* Text and number inputs. 16px text keeps iOS from zooming in on focus. */
+@utility field {
+	width: 100%;
+	padding-inline: 0.875rem;
+	border: 1px solid var(--color-line-strong);
+	border-radius: 0.75rem;
+	background-color: var(--color-surface);
+	color: var(--color-ink);
+	font-size: 1rem;
+	appearance: none;
+
+	&::placeholder {
+		color: var(--color-muted);
+	}
+
+	&:focus {
+		border-color: var(--color-primary);
+		outline: none;
+		box-shadow: 0 0 0 1px var(--color-primary);
+	}
+}
+
+/* Number inputs without the browser's tiny arrows. */
+@utility no-spinner {
+	appearance: textfield;
+
+	&::-webkit-inner-spin-button,
+	&::-webkit-outer-spin-button {
+		appearance: none;
+		margin: 0;
+	}
+}
+
+/* A checkbox drawn as an on/off switch; the knob is a gradient, so no extra markup. */
+@utility switch {
+	flex: none;
+	width: 3rem;
+	height: 1.75rem;
+	border-radius: 9999px;
+	background: radial-gradient(circle, #fff 0 11px, transparent 11.5px) no-repeat left center /
+		1.75rem 1.75rem var(--color-line-strong);
+	cursor: pointer;
+	appearance: none;
+	transition: background-position 150ms;
+
+	&:checked {
+		background-color: var(--color-primary);
+		background-position: right center;
+	}
+}
+
+/* Small rounded label, e.g. a mode or a score. Colors come from bg-* and text-*. */
+@utility pill {
+	display: inline-flex;
+	align-items: center;
+	height: 1.5rem;
+	padding-inline: 0.625rem;
+	border-radius: 9999px;
+	font-size: 0.75rem;
+	font-weight: 600;
+	white-space: nowrap;
+}

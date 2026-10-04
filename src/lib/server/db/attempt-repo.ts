@@ -25,7 +25,7 @@ export interface AttemptSetup {
 	questionCount: number;
 	random: boolean;
 	mode: 'practice' | 'exam';
-	/** Exam only; null means no limit. */
+	/** Null means no limit. */
 	timeLimitMinutes: number | null;
 }
 
@@ -48,8 +48,12 @@ export interface TestStats {
 	bestPercent: number;
 }
 
-/** Redo a past attempt: all of its questions, or only those it got wrong or left unanswered. */
-export type RedoScope = 'all' | 'mistakes';
+/** A question's state in the "All questions" list. `correct` is only set when it may be shown. */
+export interface QuestionStatus {
+	position: number;
+	answered: boolean;
+	correct?: boolean;
+}
 
 /** A question before grading is shown: no information about which answers are correct. */
 export interface OpenQuestion {
@@ -75,7 +79,7 @@ type AnswerErrorReason = 'invalid' | 'answered' | 'closed';
 
 /**
  * `invalid`: unknown question or answer, or nothing picked. `answered`: already answered
- * (practice). `closed`: the attempt is finished or its time is up (exam).
+ * (practice and mistakes). `closed`: the attempt is finished or its time is up.
  */
 export class AnswerError extends Error {
 	readonly reason: AnswerErrorReason;
@@ -122,10 +126,9 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 			.limit(setup.questionCount);
 		if (picked.length === 0) throw new Error(`Test ${testId} has no questions`);
 
-		const deadlineAt =
-			setup.mode === 'exam' && setup.timeLimitMinutes
-				? new Date(Date.now() + setup.timeLimitMinutes * 60_000)
-				: null;
+		const deadlineAt = setup.timeLimitMinutes
+			? new Date(Date.now() + setup.timeLimitMinutes * 60_000)
+			: null;
 		return this.#create(
 			{ userId, testId, mode: setup.mode, deadlineAt },
 			picked.map((q) => q.id)
@@ -133,19 +136,13 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 	}
 
 	/**
-	 * Start a new attempt from one of the user's past attempts, asking its questions in the same
-	 * order. `all` keeps the original mode (and an exam's time limit); `mistakes` asks only the
-	 * questions answered wrong or not at all, with feedback after each. Returns the new attempt id,
-	 * or undefined if the attempt isn't the user's or has nothing to redo.
+	 * Start a new attempt asking only the questions a past attempt of the user's got wrong or left
+	 * unanswered, in the same order, with feedback after each (mode `mistakes`). Returns the new
+	 * attempt id, or undefined if the attempt isn't the user's or had no mistakes.
 	 */
-	async redo(userId: string, attemptId: string, scope: RedoScope): Promise<string | undefined> {
+	async redoMistakes(userId: string, attemptId: string): Promise<string | undefined> {
 		const [source] = await this.#db
-			.select({
-				testId: attempt.testId,
-				mode: attempt.mode,
-				startedAt: attempt.startedAt,
-				deadlineAt: attempt.deadlineAt
-			})
+			.select({ testId: attempt.testId })
 			.from(attempt)
 			.where(and(eq(attempt.id, attemptId), eq(attempt.userId, userId)));
 		if (!source) return undefined;
@@ -156,21 +153,14 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 			.where(
 				and(
 					eq(attemptQuestion.attemptId, attemptId),
-					scope === 'mistakes'
-						? or(isNull(attemptQuestion.correct), not(attemptQuestion.correct))
-						: undefined
+					or(isNull(attemptQuestion.correct), not(attemptQuestion.correct))
 				)
 			)
 			.orderBy(asc(attemptQuestion.position));
 		if (rows.length === 0) return undefined;
 
-		const mode = scope === 'mistakes' ? 'mistakes' : source.mode;
-		const timeLimitMs = source.deadlineAt
-			? Math.round((source.deadlineAt.getTime() - source.startedAt.getTime()) / 60_000) * 60_000
-			: null;
-		const deadlineAt = mode === 'exam' && timeLimitMs ? new Date(Date.now() + timeLimitMs) : null;
 		return this.#create(
-			{ userId, testId: source.testId, mode, deadlineAt },
+			{ userId, testId: source.testId, mode: 'mistakes', deadlineAt: null },
 			rows.map((r) => r.questionId)
 		);
 	}
@@ -257,34 +247,37 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 			.where(and(eq(attempt.id, attemptId), isNull(attempt.finishedAt)));
 	}
 
-	/** Practice: the first unanswered question. */
-	async currentQuestion(attemptId: string): Promise<OpenQuestion | undefined> {
-		const [row] = await this.#questionRows()
-			.where(and(eq(attemptQuestion.attemptId, attemptId), isNull(attemptQuestion.answeredAt)))
-			.orderBy(asc(attemptQuestion.position))
-			.limit(1);
-		return row && this.#open(row);
-	}
-
-	/** Exam: any question, with the answer saved so far. */
-	async examQuestion(attemptId: string, position: number): Promise<OpenQuestion | undefined> {
+	/** Any question, with the answer saved so far but nothing about which answers are correct. */
+	async question(attemptId: string, position: number): Promise<OpenQuestion | undefined> {
 		const [row] = await this.#questionRows().where(
 			and(eq(attemptQuestion.attemptId, attemptId), eq(attemptQuestion.position, position))
 		);
 		return row && this.#open(row);
 	}
 
-	/** Exam: every question's position and whether it has an answer, for the jump list. */
-	async questionList(attemptId: string): Promise<{ position: number; answered: boolean }[]> {
+	/**
+	 * Every question's state for the "All questions" list. With `reveal` (practice and mistakes
+	 * modes) answered questions also say whether they were right; an exam must not pass it.
+	 */
+	async questionList(attemptId: string, reveal: boolean): Promise<QuestionStatus[]> {
 		const rows = await this.#db
-			.select({ position: attemptQuestion.position, answeredAt: attemptQuestion.answeredAt })
+			.select({
+				position: attemptQuestion.position,
+				answeredAt: attemptQuestion.answeredAt,
+				correct: attemptQuestion.correct
+			})
 			.from(attemptQuestion)
 			.where(eq(attemptQuestion.attemptId, attemptId))
 			.orderBy(asc(attemptQuestion.position));
-		return rows.map((r) => ({ position: r.position, answered: r.answeredAt !== null }));
+		return rows.map((r) => {
+			const answered = r.answeredAt !== null;
+			return reveal && answered
+				? { position: r.position, answered, correct: r.correct === true }
+				: { position: r.position, answered };
+		});
 	}
 
-	/** Practice feedback: an answered question with the correct answers revealed. */
+	/** Practice and mistakes feedback: an answered question with the correct answers revealed. */
 	async answeredQuestion(
 		attemptId: string,
 		position: number
@@ -299,7 +292,7 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		return row && this.#reveal(row);
 	}
 
-	/** Exam review: every question that was answered wrong or not at all, answers revealed. */
+	/** The results review: every question answered wrong or not at all, answers revealed. */
 	async mistakes(attemptId: string): Promise<RevealedQuestion[]> {
 		const rows = await this.#questionRows()
 			.where(
@@ -312,17 +305,9 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		return Promise.all(rows.map((row) => this.#reveal(row)));
 	}
 
-	/** Practice: grade and store an answer once; finishes the attempt after its last question. */
-	async answer(
-		attemptId: string,
-		position: number,
-		selectedAnswerIds: string[]
-	): Promise<{ finished: boolean }> {
-		const [row] = await this.#db
-			.select({ questionId: attemptQuestion.questionId, answeredAt: attemptQuestion.answeredAt })
-			.from(attemptQuestion)
-			.where(and(eq(attemptQuestion.attemptId, attemptId), eq(attemptQuestion.position, position)));
-		if (!row) throw new AnswerError('invalid');
+	/** Practice and mistakes: grade and store an answer once; it can't be changed afterwards. */
+	async answer(attemptId: string, position: number, selectedAnswerIds: string[]): Promise<void> {
+		const row = await this.#openQuestionRow(attemptId, position);
 		if (row.answeredAt) throw new AnswerError('answered');
 
 		const graded = await this.#grade(row.questionId, selectedAnswerIds);
@@ -338,15 +323,6 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 			)
 			.returning({ position: attemptQuestion.position });
 		if (updated.length === 0) throw new AnswerError('answered'); // lost a race with a double submit
-
-		const [{ remaining }] = await this.#db
-			.select({ remaining: count() })
-			.from(attemptQuestion)
-			.where(and(eq(attemptQuestion.attemptId, attemptId), isNull(attemptQuestion.answeredAt)));
-		if (remaining > 0) return { finished: false };
-
-		await this.finish(attemptId);
-		return { finished: true };
 	}
 
 	/** Exam: store (or replace) an answer while the attempt is open; the grade stays hidden. */
@@ -355,9 +331,20 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		position: number,
 		selectedAnswerIds: string[]
 	): Promise<void> {
+		const row = await this.#openQuestionRow(attemptId, position);
+		const graded = await this.#grade(row.questionId, selectedAnswerIds);
+		await this.#db
+			.update(attemptQuestion)
+			.set({ ...graded, answeredAt: new Date() })
+			.where(and(eq(attemptQuestion.attemptId, attemptId), eq(attemptQuestion.position, position)));
+	}
+
+	/** The question at `position`, if the attempt still takes answers (not finished, time not up). */
+	async #openQuestionRow(attemptId: string, position: number) {
 		const [row] = await this.#db
 			.select({
 				questionId: attemptQuestion.questionId,
+				answeredAt: attemptQuestion.answeredAt,
 				finishedAt: attempt.finishedAt,
 				deadlineAt: attempt.deadlineAt
 			})
@@ -368,12 +355,7 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		if (row.finishedAt || (row.deadlineAt && row.deadlineAt <= new Date())) {
 			throw new AnswerError('closed');
 		}
-
-		const graded = await this.#grade(row.questionId, selectedAnswerIds);
-		await this.#db
-			.update(attemptQuestion)
-			.set({ ...graded, answeredAt: new Date() })
-			.where(and(eq(attemptQuestion.attemptId, attemptId), eq(attemptQuestion.position, position)));
+		return row;
 	}
 
 	/** Check the picked answers belong to the question, and grade them. */

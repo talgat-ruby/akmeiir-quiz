@@ -4,14 +4,10 @@
 	let { label, hint, ...input }: { label: string; hint?: string } & HTMLInputAttributes = $props();
 </script>
 
-<!-- text-base (16px) keeps iOS from zooming in when the field gets focus -->
-<label class="block">
-	<span class="text-sm font-medium text-gray-700">{label}</span>
-	<input
-		{...input}
-		class="mt-1 block min-h-12 w-full rounded-lg border-gray-300 text-base shadow-sm focus:border-blue-500 focus:ring-blue-500"
-	/>
+<label class="flex flex-col gap-1.5 text-sm font-medium text-ink-soft">
+	{label}
+	<input {...input} class="h-12 field font-normal" />
 	{#if hint}
-		<span class="mt-1 block text-xs text-gray-500">{hint}</span>
+		<span class="text-[13px] font-normal text-muted">{hint}</span>
 	{/if}
 </label>

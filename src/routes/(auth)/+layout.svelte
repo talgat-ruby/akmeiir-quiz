@@ -5,10 +5,20 @@
 	let { children } = $props();
 </script>
 
-<div class="flex min-h-dvh flex-col bg-gray-50 px-4 py-10 text-gray-900">
-	<LocaleSwitcher />
-	<p class="mb-6 text-center text-lg font-semibold">{m.app_name()}</p>
-	<main class="mx-auto w-full max-w-sm rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+<div class="flex min-h-dvh flex-col items-center gap-6 px-4 py-6">
+	<div class="w-full max-w-sm">
+		<LocaleSwitcher variant="buttons" />
+	</div>
+	<div class="mt-8 flex flex-col items-center gap-3">
+		<span
+			aria-hidden="true"
+			class="grid size-14 place-items-center rounded-2xl bg-primary text-[28px] font-bold text-on-accent"
+		>
+			A
+		</span>
+		<p class="text-xl font-bold">{m.app_name()}</p>
+	</div>
+	<main class="flex w-full max-w-sm flex-col gap-4.5 card rounded-[20px] px-5 py-6">
 		{@render children()}
 	</main>
 </div>

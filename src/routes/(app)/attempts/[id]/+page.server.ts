@@ -1,8 +1,11 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { m } from '#lib/paraglide/messages.js';
 import { requireUser } from '#lib/server/auth-guard.ts';
-import { AnswerError, attemptRepo } from '#lib/server/db/index.ts';
+import { AnswerError, attemptRepo, type AttemptMode } from '#lib/server/db/index.ts';
 import type { Actions, PageServerLoad, RequestEvent } from './$types';
+
+/** Practice and mistakes show right/wrong as soon as an answer is checked; an exam only at the end. */
+const reveals = (mode: AttemptMode) => mode !== 'exam';
 
 /** `?q=<n>`: a 1-based question number, or null. */
 function questionNumber(url: URL): number | null {
@@ -20,45 +23,68 @@ async function loadAttempt({ params, locals }: Pick<RequestEvent, 'params' | 'lo
 }
 
 /**
- * Practice and Mistakes: `?q=<n>` on an answered question shows its feedback, otherwise the first
- * unanswered question, and the results once everything is answered.
- *
- * Exam: any question (`?q=<n>`, default the first unanswered) with the saved answer,
- * `?finish` asks for confirmation, and after finishing the results with a review of mistakes.
+ * One flow for every mode:
+ * - `?q=<n>` shows question n (default: the first unanswered one) — still open, or with its
+ *   answer revealed once checked in practice/mistakes mode;
+ * - `?finish` (or nothing left to answer) asks for confirmation;
+ * - after finishing: the score and a review of the mistakes.
+ * While it is open, phones show the page's own header instead of the app's (`hideAppHeaderOnPhone`).
  */
 export const load: PageServerLoad = async (event) => {
 	const attempt = await loadAttempt(event);
-	const q = questionNumber(event.url);
-
-	if (attempt.mode !== 'exam') {
-		if (q !== null) {
-			const answered = await attemptRepo.answeredQuestion(attempt.id, q - 1);
-			if (answered) return { attempt, view: 'feedback' as const, answered };
-		}
-		const current = attempt.finished ? undefined : await attemptRepo.currentQuestion(attempt.id);
-		if (current) return { attempt, view: 'question' as const, current };
-		return { attempt, view: 'results' as const, mistakes: [] };
-	}
-
 	if (attempt.finished) {
 		return { attempt, view: 'results' as const, mistakes: await attemptRepo.mistakes(attempt.id) };
 	}
 
-	const questions = await attemptRepo.questionList(attempt.id);
+	const reveal = reveals(attempt.mode);
+	const questions = await attemptRepo.questionList(attempt.id, reveal);
 	const secondsLeft = attempt.deadlineAt
 		? Math.max(0, Math.ceil((attempt.deadlineAt.getTime() - Date.now()) / 1000))
 		: null;
-	if (event.url.searchParams.has('finish')) {
-		return { attempt, view: 'confirm' as const, questions, secondsLeft };
+	const firstUnanswered = questions.find((x) => !x.answered);
+	const q = questionNumber(event.url);
+
+	if (event.url.searchParams.has('finish') || (q === null && !firstUnanswered)) {
+		return {
+			attempt,
+			view: 'confirm' as const,
+			questions,
+			secondsLeft,
+			hideAppHeaderOnPhone: true
+		};
 	}
 
-	const position =
-		q !== null && q <= questions.length
-			? q - 1
-			: (questions.find((x) => !x.answered)?.position ?? 0);
-	const current = await attemptRepo.examQuestion(attempt.id, position);
+	const position = q !== null && q <= questions.length ? q - 1 : (firstUnanswered?.position ?? 0);
+	// Where "Next question" leads: the next unanswered question after this one, wrapping around.
+	const nextUnanswered =
+		[...questions.slice(position + 1), ...questions.slice(0, position)].find((x) => !x.answered)
+			?.position ?? null;
+
+	if (reveal && questions[position]?.answered) {
+		const revealed = await attemptRepo.answeredQuestion(attempt.id, position);
+		if (!revealed) error(404, m.attempt_not_found());
+		return {
+			attempt,
+			view: 'revealed' as const,
+			revealed,
+			questions,
+			secondsLeft,
+			nextUnanswered,
+			hideAppHeaderOnPhone: true
+		};
+	}
+
+	const current = await attemptRepo.question(attempt.id, position);
 	if (!current) error(404, m.attempt_not_found());
-	return { attempt, view: 'exam' as const, current, questions, secondsLeft };
+	return {
+		attempt,
+		view: 'question' as const,
+		current,
+		questions,
+		secondsLeft,
+		nextUnanswered,
+		hideAppHeaderOnPhone: true
+	};
 };
 
 function readAnswer(form: FormData) {
@@ -66,10 +92,10 @@ function readAnswer(form: FormData) {
 }
 
 export const actions: Actions = {
-	// Practice and Mistakes: grade one answer and show its feedback.
+	// Practice and mistakes: grade one answer and show it revealed.
 	answer: async (event) => {
 		const attempt = await loadAttempt(event);
-		if (attempt.mode === 'exam') error(400, m.action_not_allowed());
+		if (!reveals(attempt.mode)) error(400, m.action_not_allowed());
 		const { position, selected } = readAnswer(await event.request.formData());
 
 		try {
@@ -77,15 +103,16 @@ export const actions: Actions = {
 		} catch (e) {
 			if (!(e instanceof AnswerError)) throw e;
 			if (e.reason === 'invalid') return fail(400, { message: m.answer_invalid() });
-			// 'answered' (e.g. a double tap): just show that question's feedback.
+			if (e.reason === 'closed') redirect(303, `/attempts/${attempt.id}`);
+			// 'answered' (e.g. a double tap): just show that question revealed.
 		}
 		redirect(303, `/attempts/${attempt.id}?q=${position + 1}`);
 	},
 
-	// Exam: save (or change) an answer without feedback, then go to the next question.
+	// Exam: save (or change) an answer without revealing anything, then go to the next question.
 	save: async (event) => {
 		const attempt = await loadAttempt(event);
-		if (attempt.mode !== 'exam') error(400, m.action_not_allowed());
+		if (reveals(attempt.mode)) error(400, m.action_not_allowed());
 		const { position, selected } = readAnswer(await event.request.formData());
 
 		try {
@@ -99,10 +126,9 @@ export const actions: Actions = {
 		redirect(303, `/attempts/${attempt.id}${isLast ? '?finish' : `?q=${position + 2}`}`);
 	},
 
-	// Exam: hand it in.
+	// Any mode: hand it in.
 	finish: async (event) => {
 		const attempt = await loadAttempt(event);
-		if (attempt.mode !== 'exam') error(400, m.action_not_allowed());
 		await attemptRepo.finish(attempt.id);
 		redirect(303, `/attempts/${attempt.id}`);
 	}

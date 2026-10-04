@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { m } from '#lib/paraglide/messages.js';
-import { requireAdmin, requireUser } from '#lib/server/auth-guard.ts';
+import { requireUser } from '#lib/server/auth-guard.ts';
 import { attemptRepo, testRepo } from '#lib/server/db/index.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -12,16 +12,21 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 	const test = await testRepo.get(params.id);
 	if (!test) error(404, m.test_not_found());
 
+	const [unfinishedAttemptId, stats] = await Promise.all([
+		attemptRepo.findUnfinished(user.id, test.id),
+		attemptRepo.statsByTest(user.id)
+	]);
 	return {
 		test,
 		defaultQuestionCount: Math.min(DEFAULT_QUESTION_COUNT, test.questionCount),
 		maxTimeLimitMinutes: MAX_TIME_LIMIT_MINUTES,
-		unfinishedAttemptId: (await attemptRepo.findUnfinished(user.id, test.id)) ?? null
+		unfinishedAttemptId: unfinishedAttemptId ?? null,
+		bestPercent: stats[test.id]?.bestPercent ?? null
 	};
 };
 
 export const actions: Actions = {
-	// The setup form: mode, time limit (exam only), how many questions, random or in order.
+	// The setup form: mode, time limit, how many questions, random or in order.
 	start: async ({ params, locals, request }) => {
 		const user = requireUser(locals);
 		const test = await testRepo.get(params.id);
@@ -45,7 +50,7 @@ export const actions: Actions = {
 		}
 
 		let timeLimitMinutes: number | null = null;
-		if (values.mode === 'exam' && values.timeLimitMinutes !== '') {
+		if (values.timeLimitMinutes !== '') {
 			timeLimitMinutes = Number(values.timeLimitMinutes);
 			if (
 				!Number.isInteger(timeLimitMinutes) ||
@@ -66,15 +71,5 @@ export const actions: Actions = {
 			timeLimitMinutes
 		});
 		redirect(303, `/attempts/${attemptId}`);
-	},
-
-	// Admins only: delete the test together with everyone's attempts on it.
-	delete: async ({ params, locals, request }) => {
-		requireAdmin(locals);
-		if ((await request.formData()).get('confirm') !== 'on') {
-			return fail(400, { deleteMessage: m.delete_confirm_required() });
-		}
-		await testRepo.delete(params.id);
-		redirect(303, '/tests');
 	}
 };
