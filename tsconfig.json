@@ -1,11 +1,9 @@
 {
 	"extends": "$app/tsconfig",
 	"compilerOptions": {
-		"strict": true
+		"strict": true,
+		// TypeScript 6 no longer loads @types/* automatically; keep SvelteKit's types and add Node's.
+		"types": ["$app/types", "node"]
 	},
-	"include": [
-		"src",
-		"vite.config.ts",
-		"drizzle.config.ts"
-	]
+	"include": ["src", "scripts", "vite.config.ts", "drizzle.config.ts"]
 }

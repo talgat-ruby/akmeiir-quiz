@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791118786851,
+      "tag": "0000_aromatic_bromley",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791119319322,
+      "tag": "0001_demonic_namora",
+      "breakpoints": true
+    }
+  ]
+}
