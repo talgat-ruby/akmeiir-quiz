@@ -3,6 +3,9 @@ import { user } from './auth.schema.ts';
 import { id } from './columns.ts';
 import { question, test } from './tests.schema.ts';
 
+export const ATTEMPT_MODES = ['practice', 'exam'] as const;
+export type AttemptMode = (typeof ATTEMPT_MODES)[number];
+
 /** One run through a test by one user. Unfinished while `finishedAt` is null. */
 export const attempt = sqliteTable(
 	'attempt',
@@ -14,6 +17,9 @@ export const attempt = sqliteTable(
 		testId: text('test_id')
 			.notNull()
 			.references(() => test.id, { onDelete: 'cascade' }),
+		mode: text('mode', { enum: ATTEMPT_MODES }).notNull().default('practice'),
+		/** Exam time limit: after this moment no answers are accepted and the attempt is finished. */
+		deadlineAt: integer('deadline_at', { mode: 'timestamp_ms' }),
 		startedAt: integer('started_at', { mode: 'timestamp_ms' })
 			.notNull()
 			.$defaultFn(() => new Date()),

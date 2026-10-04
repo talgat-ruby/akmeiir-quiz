@@ -6,8 +6,14 @@ import { asc, eq } from 'drizzle-orm';
 import { drizzle, type LibSQLDatabase } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AnswerError, AttemptRepo, sameAnswers, shuffle } from './attempt-repo.ts';
-import { attemptQuestion } from './attempts.schema.ts';
+import {
+	AnswerError,
+	AttemptRepo,
+	sameAnswers,
+	shuffle,
+	type AttemptSetup
+} from './attempt-repo.ts';
+import { attempt, attemptQuestion } from './attempts.schema.ts';
 import { user } from './auth.schema.ts';
 import { TestRepo, type NewTest } from './test-repo.ts';
 import { answer, question } from './tests.schema.ts';
@@ -23,6 +29,20 @@ const fiveQuestions: NewTest = {
 		]
 	}))
 };
+
+const practice = (questionCount: number, random = true): AttemptSetup => ({
+	questionCount,
+	random,
+	mode: 'practice',
+	timeLimitMinutes: null
+});
+
+const exam = (questionCount: number, timeLimitMinutes: number | null = null): AttemptSetup => ({
+	questionCount,
+	random: false,
+	mode: 'exam',
+	timeLimitMinutes
+});
 
 const multiChoice: NewTest = {
 	title: 'Multi',
@@ -101,8 +121,8 @@ describe('AttemptRepo', () => {
 	it('picks distinct random questions, capped at the test size', async () => {
 		const testId = await tests.create(fiveQuestions);
 
-		const small = await repo.start('alice', testId, { questionCount: 3, random: true });
-		const all = await repo.start('alice', testId, { questionCount: 10, random: true });
+		const small = await repo.start('alice', testId, practice(3));
+		const all = await repo.start('alice', testId, practice(10));
 
 		expect((await repo.get(small, 'alice'))?.total).toBe(3);
 		const rows = await db.select().from(attemptQuestion).where(eq(attemptQuestion.attemptId, all));
@@ -113,7 +133,7 @@ describe('AttemptRepo', () => {
 	it('takes the first questions in order when random is off', async () => {
 		const testId = await tests.create(fiveQuestions);
 
-		const attemptId = await repo.start('alice', testId, { questionCount: 3, random: false });
+		const attemptId = await repo.start('alice', testId, practice(3, false));
 
 		const asked = await db
 			.select({ text: question.text })
@@ -126,7 +146,7 @@ describe('AttemptRepo', () => {
 
 	it('stores each question’s answers in a shuffled order', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, { questionCount: 5, random: true });
+		const attemptId = await repo.start('alice', testId, practice(5));
 
 		for (const row of await db
 			.select()
@@ -141,7 +161,7 @@ describe('AttemptRepo', () => {
 
 	it('shows the current question without revealing correct answers', async () => {
 		const testId = await tests.create(multiChoice);
-		const attemptId = await repo.start('alice', testId, { questionCount: 10, random: true });
+		const attemptId = await repo.start('alice', testId, practice(10));
 
 		const current = await repo.currentQuestion(attemptId);
 
@@ -152,7 +172,7 @@ describe('AttemptRepo', () => {
 
 	it('grades answers and reveals them only after answering', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, { questionCount: 2, random: true });
+		const attemptId = await repo.start('alice', testId, practice(2));
 		const first = await answerIds(attemptId, 0);
 		const second = await answerIds(attemptId, 1);
 
@@ -175,7 +195,7 @@ describe('AttemptRepo', () => {
 
 	it('grades multi-select questions all-or-nothing', async () => {
 		const testId = await tests.create(multiChoice);
-		const attemptId = await repo.start('alice', testId, { questionCount: 1, random: true });
+		const attemptId = await repo.start('alice', testId, practice(1));
 		const { right } = await answerIds(attemptId, 0);
 
 		await repo.answer(attemptId, 0, [right[0]]);
@@ -185,7 +205,7 @@ describe('AttemptRepo', () => {
 
 	it('rejects empty, foreign and repeated answers', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, { questionCount: 2, random: true });
+		const attemptId = await repo.start('alice', testId, practice(2));
 		const first = await answerIds(attemptId, 0);
 		const second = await answerIds(attemptId, 1);
 		const reason = (p: Promise<unknown>) =>
@@ -203,7 +223,7 @@ describe('AttemptRepo', () => {
 
 	it('keeps attempts private to their user', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, { questionCount: 2, random: true });
+		const attemptId = await repo.start('alice', testId, practice(2));
 
 		expect(await repo.get(attemptId, 'bob')).toBeUndefined();
 		expect(await repo.findUnfinished('bob', testId)).toBeUndefined();
@@ -212,7 +232,7 @@ describe('AttemptRepo', () => {
 
 	it('forgets the unfinished attempt once it is finished', async () => {
 		const testId = await tests.create(fiveQuestions);
-		const attemptId = await repo.start('alice', testId, { questionCount: 1, random: true });
+		const attemptId = await repo.start('alice', testId, practice(1));
 		const { right } = await answerIds(attemptId, 0);
 
 		await repo.answer(attemptId, 0, right);
@@ -223,9 +243,97 @@ describe('AttemptRepo', () => {
 	it('refuses to start a test without questions', async () => {
 		const testId = await tests.create({ title: 'Empty', questions: [] });
 
-		await expect(repo.start('alice', testId, { questionCount: 10, random: true })).rejects.toThrow(
-			'has no questions'
-		);
+		await expect(repo.start('alice', testId, practice(10))).rejects.toThrow('has no questions');
 		expect(await db.select().from(question)).toEqual([]);
+	});
+
+	describe('exam', () => {
+		it('stores the mode and a deadline only when there is a time limit', async () => {
+			const testId = await tests.create(fiveQuestions);
+
+			const timed = await repo.get(await repo.start('alice', testId, exam(2, 30)), 'alice');
+			const untimed = await repo.get(await repo.start('alice', testId, exam(2)), 'alice');
+			const practiceRun = await repo.get(
+				await repo.start('alice', testId, { ...practice(2), timeLimitMinutes: 30 }),
+				'alice'
+			);
+
+			expect(timed?.mode).toBe('exam');
+			const minutesLeft = (timed!.deadlineAt!.getTime() - Date.now()) / 60_000;
+			expect(minutesLeft).toBeGreaterThan(29);
+			expect(minutesLeft).toBeLessThanOrEqual(30);
+			expect(untimed?.deadlineAt).toBeNull();
+			expect(practiceRun).toMatchObject({ mode: 'practice', deadlineAt: null });
+		});
+
+		it('lets answers change until the end, keeping grades hidden', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const attemptId = await repo.start('alice', testId, exam(2));
+			const first = await answerIds(attemptId, 0);
+
+			await repo.saveExamAnswer(attemptId, 0, [first.wrong]);
+			await repo.saveExamAnswer(attemptId, 0, first.right);
+
+			const shown = await repo.examQuestion(attemptId, 0);
+			expect(shown?.selected).toEqual(first.right);
+			for (const a of shown!.answers) expect(Object.keys(a).sort()).toEqual(['id', 'text']);
+			expect(await repo.questionList(attemptId)).toEqual([
+				{ position: 0, answered: true },
+				{ position: 1, answered: false }
+			]);
+			expect((await repo.get(attemptId, 'alice'))?.finished).toBe(false);
+		});
+
+		it('scores on finish and reviews wrong and unanswered questions', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const attemptId = await repo.start('alice', testId, exam(3));
+			await repo.saveExamAnswer(attemptId, 0, (await answerIds(attemptId, 0)).right);
+			await repo.saveExamAnswer(attemptId, 1, [(await answerIds(attemptId, 1)).wrong]);
+
+			await repo.finish(attemptId);
+
+			expect(await repo.get(attemptId, 'alice')).toMatchObject({
+				finished: true,
+				answered: 2,
+				correct: 1
+			});
+			const mistakes = await repo.mistakes(attemptId);
+			expect(mistakes.map((q) => [q.position, q.answered])).toEqual([
+				[1, true],
+				[2, false]
+			]);
+			expect(mistakes[1].answers.filter((a) => a.correct)).toHaveLength(1);
+		});
+
+		it('refuses answers after finishing', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const attemptId = await repo.start('alice', testId, exam(2));
+			await repo.finish(attemptId);
+
+			await expect(
+				repo.saveExamAnswer(attemptId, 0, (await answerIds(attemptId, 0)).right)
+			).rejects.toMatchObject({ reason: 'closed' });
+		});
+
+		it('finishes at the deadline once the time is up', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const attemptId = await repo.start('alice', testId, exam(2, 1));
+			const { right } = await answerIds(attemptId, 0);
+
+			await repo.finishExpired(attemptId);
+			expect((await repo.get(attemptId, 'alice'))?.finished).toBe(false);
+			expect(await repo.findUnfinished('alice', testId)).toBe(attemptId);
+
+			const past = new Date(Date.now() - 1000);
+			await db.update(attempt).set({ deadlineAt: past }).where(eq(attempt.id, attemptId));
+
+			expect(await repo.findUnfinished('alice', testId)).toBeUndefined();
+			await expect(repo.saveExamAnswer(attemptId, 0, right)).rejects.toMatchObject({
+				reason: 'closed'
+			});
+			await repo.finishExpired(attemptId);
+			const [row] = await db.select().from(attempt).where(eq(attempt.id, attemptId));
+			expect(row.finishedAt?.getTime()).toBe(past.getTime());
+		});
 	});
 });

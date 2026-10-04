@@ -33,6 +33,39 @@
 {/if}
 
 <form method="POST">
+	<fieldset>
+		<legend>{m.setup_mode()}</legend>
+		<p>
+			<label>
+				<input
+					type="radio"
+					name="mode"
+					value="practice"
+					checked={(form?.mode ?? 'practice') === 'practice'}
+				/>
+				{m.mode_practice()}
+			</label>
+		</p>
+		<p>
+			<label>
+				<input type="radio" name="mode" value="exam" checked={form?.mode === 'exam'} />
+				{m.mode_exam()}
+			</label>
+		</p>
+	</fieldset>
+	<p>
+		<label>
+			{m.setup_time_limit()}
+			<input
+				type="number"
+				name="timeLimitMinutes"
+				min="1"
+				max={data.maxTimeLimitMinutes}
+				value={form?.timeLimitMinutes ?? ''}
+				inputmode="numeric"
+			/>
+		</label>
+	</p>
 	<p>
 		<label>
 			{m.setup_question_count()}

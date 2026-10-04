@@ -5,6 +5,7 @@ import { attemptRepo, testRepo } from '#lib/server/db/index.ts';
 import type { Actions, PageServerLoad } from './$types';
 
 const DEFAULT_QUESTION_COUNT = 10;
+const MAX_TIME_LIMIT_MINUTES = 600;
 
 export const load: PageServerLoad = async ({ params, locals }) => {
 	const user = requireUser(locals);
@@ -14,33 +15,56 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 	return {
 		test,
 		defaultQuestionCount: Math.min(DEFAULT_QUESTION_COUNT, test.questionCount),
+		maxTimeLimitMinutes: MAX_TIME_LIMIT_MINUTES,
 		unfinishedAttemptId: (await attemptRepo.findUnfinished(user.id, test.id)) ?? null
 	};
 };
 
 export const actions: Actions = {
-	// The setup form: how many questions, and whether to pick them at random.
+	// The setup form: mode, time limit (exam only), how many questions, random or in order.
 	default: async ({ params, locals, request }) => {
 		const user = requireUser(locals);
 		const test = await testRepo.get(params.id);
 		if (!test) error(404, m.test_not_found());
 
 		const form = await request.formData();
-		const questionCount = Number(form.get('questionCount'));
-		const random = form.get('random') === 'on';
+		const values = {
+			mode: form.get('mode') === 'exam' ? ('exam' as const) : ('practice' as const),
+			questionCount: String(form.get('questionCount') ?? '').trim(),
+			random: form.get('random') === 'on',
+			timeLimitMinutes: String(form.get('timeLimitMinutes') ?? '').trim()
+		};
+
+		const questionCount = Number(values.questionCount);
 		if (
 			!Number.isInteger(questionCount) ||
 			questionCount < 1 ||
 			questionCount > test.questionCount
 		) {
-			return fail(400, {
-				questionCount: String(form.get('questionCount') ?? ''),
-				random,
-				message: m.setup_count_invalid({ max: test.questionCount })
-			});
+			return fail(400, { ...values, message: m.setup_count_invalid({ max: test.questionCount }) });
 		}
 
-		const attemptId = await attemptRepo.start(user.id, test.id, { questionCount, random });
+		let timeLimitMinutes: number | null = null;
+		if (values.mode === 'exam' && values.timeLimitMinutes !== '') {
+			timeLimitMinutes = Number(values.timeLimitMinutes);
+			if (
+				!Number.isInteger(timeLimitMinutes) ||
+				timeLimitMinutes < 1 ||
+				timeLimitMinutes > MAX_TIME_LIMIT_MINUTES
+			) {
+				return fail(400, {
+					...values,
+					message: m.setup_time_limit_invalid({ max: MAX_TIME_LIMIT_MINUTES })
+				});
+			}
+		}
+
+		const attemptId = await attemptRepo.start(user.id, test.id, {
+			mode: values.mode,
+			questionCount,
+			random: values.random,
+			timeLimitMinutes
+		});
 		redirect(303, `/attempts/${attemptId}`);
 	}
 };
