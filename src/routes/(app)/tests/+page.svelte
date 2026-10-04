@@ -32,13 +32,10 @@
 						{m.question_count({ count: test.questionCount })}
 					</p>
 					{#if data.stats[test.id]}
-						{@const { bestPercent, mistakes } = data.stats[test.id]}
-						<p>
-							{#if bestPercent !== null}{m.best_score({ percent: bestPercent })} ·{/if}
-							{m.mistakes_count({ count: mistakes })}
-						</p>
+						<p>{m.best_score({ percent: data.stats[test.id].bestPercent })}</p>
 					{/if}
 				</a>
+				<a href={resolve('/(app)/tests/[id]/history', { id: test.id })}>{m.history_link()}</a>
 			</li>
 		{/each}
 	</ul>

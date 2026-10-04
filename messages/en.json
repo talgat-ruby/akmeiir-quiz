@@ -69,12 +69,8 @@
 	"review_title": "Mistakes",
 	"review_none": "No mistakes — well done!",
 	"review_not_answered": "Not answered",
-	"mode_mistakes": "Mistakes — only the questions you got wrong last time ({count})",
-	"mistakes_none": "No mistakes to review yet.",
 	"action_not_allowed": "This action is not allowed for this attempt.",
 	"best_score": "Best: {percent}%",
-	"mistakes_count": "Mistakes: {count}",
-	"nav_history": "History",
 	"history_title": "History",
 	"history_empty": "No attempts yet.",
 	"history_score": "{correct} of {total} ({percent}%)",
@@ -93,5 +89,11 @@
 	"upload_rejected": "{name} was not imported:",
 	"delete_test": "Delete this test",
 	"delete_confirm": "Yes, delete “{title}” and everyone’s attempts on it. This can’t be undone.",
-	"delete_confirm_required": "Tick the box to confirm."
+	"delete_confirm_required": "Tick the box to confirm.",
+	"history_link": "History",
+	"history_of": "History — {title}",
+	"history_open": "Open",
+	"redo_all": "Redo all",
+	"redo_mistakes": "Redo mistakes ({count})",
+	"redo_nothing": "There is nothing to redo in this attempt."
 }

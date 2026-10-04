@@ -52,18 +52,6 @@
 				{m.mode_exam()}
 			</label>
 		</p>
-		<p>
-			<label>
-				<input
-					type="radio"
-					name="mode"
-					value="mistakes"
-					checked={form?.mode === 'mistakes'}
-					disabled={data.mistakesCount === 0}
-				/>
-				{m.mode_mistakes({ count: data.mistakesCount })}
-			</label>
-		</p>
 	</fieldset>
 	<p>
 		<label>

@@ -24,7 +24,7 @@ export type { AttemptMode } from './attempts.schema.ts';
 export interface AttemptSetup {
 	questionCount: number;
 	random: boolean;
-	mode: AttemptMode;
+	mode: 'practice' | 'exam';
 	/** Exam only; null means no limit. */
 	timeLimitMinutes: number | null;
 }
@@ -44,11 +44,12 @@ export interface AttemptSummary {
 
 /** The user's track record on one test, for the test list. */
 export interface TestStats {
-	/** Best score of a finished practice or exam attempt, in percent; null if none yet. */
-	bestPercent: number | null;
-	/** Questions whose latest seen answer was wrong — what Mistakes mode would ask. */
-	mistakes: number;
+	/** Best score of a finished practice or exam attempt, in percent. */
+	bestPercent: number;
 }
+
+/** Redo a past attempt: all of its questions, or only those it got wrong or left unanswered. */
+export type RedoScope = 'all' | 'mistakes';
 
 /** A question before grading is shown: no information about which answers are correct. */
 export interface OpenQuestion {
@@ -110,52 +111,68 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 
 	/**
 	 * Start an attempt with up to `questionCount` questions — a random selection in random order,
-	 * or the first ones in the set's order. Mistakes mode only picks the user's current mistakes.
-	 * Returns the attempt id.
+	 * or the first ones in the set's order. Returns the attempt id.
 	 */
 	async start(userId: string, testId: string, setup: AttemptSetup): Promise<string> {
-		const pool =
-			setup.mode === 'mistakes'
-				? inArray(question.id, await this.mistakeQuestionIds(userId, testId))
-				: undefined;
 		const picked = await this.#db
 			.select({ id: question.id })
 			.from(question)
-			.where(and(eq(question.testId, testId), pool))
+			.where(eq(question.testId, testId))
 			.orderBy(setup.random ? sql`random()` : asc(question.position))
 			.limit(setup.questionCount);
-		if (picked.length === 0) throw new Error(`No questions to ask in test ${testId}`);
+		if (picked.length === 0) throw new Error(`Test ${testId} has no questions`);
 
-		const answers = await this.#db
-			.select({ id: answer.id, questionId: answer.questionId })
-			.from(answer)
-			.where(
-				inArray(
-					answer.questionId,
-					picked.map((q) => q.id)
-				)
-			);
-		const answersByQuestion = Map.groupBy(answers, (a) => a.questionId);
-
-		const attemptId = crypto.randomUUID();
 		const deadlineAt =
 			setup.mode === 'exam' && setup.timeLimitMinutes
 				? new Date(Date.now() + setup.timeLimitMinutes * 60_000)
 				: null;
-		await this.#db.batch([
-			this.#db
-				.insert(attempt)
-				.values({ id: attemptId, userId, testId, mode: setup.mode, deadlineAt }),
-			this.#db.insert(attemptQuestion).values(
-				picked.map((q, position) => ({
-					attemptId,
-					position,
-					questionId: q.id,
-					answerOrder: shuffle((answersByQuestion.get(q.id) ?? []).map((a) => a.id))
-				}))
+		return this.#create(
+			{ userId, testId, mode: setup.mode, deadlineAt },
+			picked.map((q) => q.id)
+		);
+	}
+
+	/**
+	 * Start a new attempt from one of the user's past attempts, asking its questions in the same
+	 * order. `all` keeps the original mode (and an exam's time limit); `mistakes` asks only the
+	 * questions answered wrong or not at all, with feedback after each. Returns the new attempt id,
+	 * or undefined if the attempt isn't the user's or has nothing to redo.
+	 */
+	async redo(userId: string, attemptId: string, scope: RedoScope): Promise<string | undefined> {
+		const [source] = await this.#db
+			.select({
+				testId: attempt.testId,
+				mode: attempt.mode,
+				startedAt: attempt.startedAt,
+				deadlineAt: attempt.deadlineAt
+			})
+			.from(attempt)
+			.where(and(eq(attempt.id, attemptId), eq(attempt.userId, userId)));
+		if (!source) return undefined;
+
+		const rows = await this.#db
+			.select({ questionId: attemptQuestion.questionId })
+			.from(attemptQuestion)
+			.where(
+				and(
+					eq(attemptQuestion.attemptId, attemptId),
+					scope === 'mistakes'
+						? or(isNull(attemptQuestion.correct), not(attemptQuestion.correct))
+						: undefined
+				)
 			)
-		]);
-		return attemptId;
+			.orderBy(asc(attemptQuestion.position));
+		if (rows.length === 0) return undefined;
+
+		const mode = scope === 'mistakes' ? 'mistakes' : source.mode;
+		const timeLimitMs = source.deadlineAt
+			? Math.round((source.deadlineAt.getTime() - source.startedAt.getTime()) / 60_000) * 60_000
+			: null;
+		const deadlineAt = mode === 'exam' && timeLimitMs ? new Date(Date.now() + timeLimitMs) : null;
+		return this.#create(
+			{ userId, testId: source.testId, mode, deadlineAt },
+			rows.map((r) => r.questionId)
+		);
 	}
 
 	/** The user's attempt with progress counts; undefined if missing or someone else's. */
@@ -166,20 +183,15 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 		return summary && withFinished(summary);
 	}
 
-	/** All of the user's attempts, newest first. */
-	async history(userId: string): Promise<AttemptSummary[]> {
+	/** The user's attempts on one test, newest first. */
+	async history(userId: string, testId: string): Promise<AttemptSummary[]> {
 		const rows = await this.#summaries()
-			.where(eq(attempt.userId, userId))
+			.where(and(eq(attempt.userId, userId), eq(attempt.testId, testId)))
 			.orderBy(desc(attempt.startedAt));
 		return rows.map(withFinished);
 	}
 
-	/** Questions of a test whose latest seen answer by the user was wrong. */
-	async mistakeQuestionIds(userId: string, testId: string): Promise<string[]> {
-		return latestMistakes(await this.#seenAnswers(userId, testId)).get(testId) ?? [];
-	}
-
-	/** Best score and mistakes count for every test the user has tried, keyed by test id. */
+	/** Best score for every test the user has finished, keyed by test id. */
 	async statsByTest(userId: string): Promise<Record<string, TestStats>> {
 		const finished = await this.#db
 			.select({
@@ -197,16 +209,12 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 				)
 			)
 			.groupBy(attempt.id);
-		const mistakes = latestMistakes(await this.#seenAnswers(userId));
 
 		const stats: Record<string, TestStats> = {};
-		const statsFor = (testId: string) => (stats[testId] ??= { bestPercent: null, mistakes: 0 });
 		for (const { testId, total, correct } of finished) {
 			const percent = Math.round((correct / total) * 100);
-			const s = statsFor(testId);
-			s.bestPercent = Math.max(s.bestPercent ?? 0, percent);
+			stats[testId] = { bestPercent: Math.max(stats[testId]?.bestPercent ?? 0, percent) };
 		}
-		for (const [testId, ids] of mistakes) statsFor(testId).mistakes = ids.length;
 		return stats;
 	}
 
@@ -405,28 +413,30 @@ export class AttemptRepo<TSchema extends Record<string, unknown>> {
 			.$dynamic();
 	}
 
-	/**
-	 * The user's answers whose result they have seen, oldest first: practice and mistakes answers
-	 * right away, exam answers once the exam is finished.
-	 */
-	#seenAnswers(userId: string, testId?: string) {
-		return this.#db
-			.select({
-				testId: attempt.testId,
-				questionId: attemptQuestion.questionId,
-				correct: attemptQuestion.correct
-			})
-			.from(attemptQuestion)
-			.innerJoin(attempt, eq(attempt.id, attemptQuestion.attemptId))
-			.where(
-				and(
-					eq(attempt.userId, userId),
-					testId === undefined ? undefined : eq(attempt.testId, testId),
-					isNotNull(attemptQuestion.answeredAt),
-					or(isNotNull(attempt.finishedAt), ne(attempt.mode, 'exam'))
-				)
+	/** Insert an attempt asking `questionIds` in that order, each with freshly shuffled answers. */
+	async #create(
+		values: { userId: string; testId: string; mode: AttemptMode; deadlineAt: Date | null },
+		questionIds: string[]
+	): Promise<string> {
+		const answers = await this.#db
+			.select({ id: answer.id, questionId: answer.questionId })
+			.from(answer)
+			.where(inArray(answer.questionId, questionIds));
+		const answersByQuestion = Map.groupBy(answers, (a) => a.questionId);
+
+		const attemptId = crypto.randomUUID();
+		await this.#db.batch([
+			this.#db.insert(attempt).values({ id: attemptId, ...values }),
+			this.#db.insert(attemptQuestion).values(
+				questionIds.map((questionId, position) => ({
+					attemptId,
+					position,
+					questionId,
+					answerOrder: shuffle((answersByQuestion.get(questionId) ?? []).map((a) => a.id))
+				}))
 			)
-			.orderBy(asc(attemptQuestion.answeredAt));
+		]);
+		return attemptId;
 	}
 
 	/** Question rows of attempts; callers add the full `where`. */
@@ -484,20 +494,6 @@ function withFinished({
 	...summary
 }: Omit<AttemptSummary, 'finished'> & { finishedAt: Date | null }): AttemptSummary {
 	return { ...summary, finished: finishedAt !== null };
-}
-
-/** For each test, the questions whose latest answer (rows come oldest first) was wrong. */
-function latestMistakes(
-	answers: { testId: string; questionId: string; correct: boolean | null }[]
-): Map<string, string[]> {
-	const latest = new Map<string, (typeof answers)[number]>();
-	for (const a of answers) latest.set(a.questionId, a);
-
-	const byTest = new Map<string, string[]>();
-	for (const a of latest.values()) {
-		if (a.correct === false) byTest.set(a.testId, [...(byTest.get(a.testId) ?? []), a.questionId]);
-	}
-	return byTest;
 }
 
 interface QuestionRow {

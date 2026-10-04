@@ -243,7 +243,7 @@ describe('AttemptRepo', () => {
 	it('refuses to start a test without questions', async () => {
 		const testId = await tests.create({ title: 'Empty', questions: [] });
 
-		await expect(repo.start('alice', testId, practice(10))).rejects.toThrow('No questions to ask');
+		await expect(repo.start('alice', testId, practice(10))).rejects.toThrow('has no questions');
 		expect(await db.select().from(question)).toEqual([]);
 	});
 
@@ -337,89 +337,39 @@ describe('AttemptRepo', () => {
 		});
 	});
 
-	describe('history and mistakes', () => {
+	describe('history and redo', () => {
 		const tick = () => new Promise((r) => setTimeout(r, 5));
 
-		/** Practice the first `n` questions in order, answering right where `pattern` says so. */
+		/** Practice the first questions in order, answering right where `pattern` says so. */
 		async function practiceRun(testId: string, pattern: boolean[], userId = 'alice') {
 			const attemptId = await repo.start(userId, testId, practice(pattern.length, false));
 			for (const [position, right] of pattern.entries()) {
 				const ids = await answerIds(attemptId, position);
 				await repo.answer(attemptId, position, right ? ids.right : [ids.wrong]);
-				await tick();
 			}
 			return attemptId;
 		}
 
-		const texts = async (ids: string[]) =>
-			(await db.select({ id: question.id, text: question.text }).from(question))
-				.filter((q) => ids.includes(q.id))
-				.map((q) => q.text)
-				.sort();
+		const asked = async (attemptId: string) =>
+			(
+				await db
+					.select({ text: question.text })
+					.from(attemptQuestion)
+					.innerJoin(question, eq(question.id, attemptQuestion.questionId))
+					.where(eq(attemptQuestion.attemptId, attemptId))
+					.orderBy(asc(attemptQuestion.position))
+			).map((q) => q.text);
 
-		it('counts the latest answer per question', async () => {
+		it('lists the user’s attempts on one test, newest first', async () => {
 			const testId = await tests.create(fiveQuestions);
-			await practiceRun(testId, [false, false, true]); // Q1 ✗, Q2 ✗, Q3 ✓
-			await practiceRun(testId, [true, false]); //        Q1 ✓, Q2 ✗
-
-			expect(await texts(await repo.mistakeQuestionIds('alice', testId))).toEqual(['Q2']);
-		});
-
-		it('ignores an unfinished exam until it is finished', async () => {
-			const testId = await tests.create(fiveQuestions);
-			const examId = await repo.start('alice', testId, exam(1));
-			await repo.saveExamAnswer(examId, 0, [(await answerIds(examId, 0)).wrong]);
-
-			expect(await repo.mistakeQuestionIds('alice', testId)).toEqual([]);
-			await repo.finish(examId);
-			expect(await texts(await repo.mistakeQuestionIds('alice', testId))).toEqual(['Q1']);
-		});
-
-		it('keeps each user’s mistakes separate', async () => {
-			const testId = await tests.create(fiveQuestions);
-			await practiceRun(testId, [false], 'bob');
-
-			expect(await repo.mistakeQuestionIds('alice', testId)).toEqual([]);
-		});
-
-		it('asks only the current mistakes in Mistakes mode, and clears the ones answered right', async () => {
-			const testId = await tests.create(fiveQuestions);
-			await practiceRun(testId, [false, true, false]); // Q1 ✗, Q3 ✗
-
-			const mistakesId = await repo.start('alice', testId, {
-				...practice(10),
-				mode: 'mistakes'
-			});
-			const asked = await db
-				.select({ text: question.text })
-				.from(attemptQuestion)
-				.innerJoin(question, eq(question.id, attemptQuestion.questionId))
-				.where(eq(attemptQuestion.attemptId, mistakesId));
-			expect(asked.map((q) => q.text).sort()).toEqual(['Q1', 'Q3']);
-
-			const current = await repo.currentQuestion(mistakesId);
-			const ids = await answerIds(mistakesId, current!.position);
-			await tick();
-			await repo.answer(mistakesId, current!.position, ids.right);
-			expect(await repo.mistakeQuestionIds('alice', testId)).toHaveLength(1);
-		});
-
-		it('refuses Mistakes mode when there are no mistakes', async () => {
-			const testId = await tests.create(fiveQuestions);
-
-			await expect(
-				repo.start('alice', testId, { ...practice(10), mode: 'mistakes' })
-			).rejects.toThrow('No questions to ask');
-		});
-
-		it('lists the user’s attempts newest first with their scores', async () => {
-			const testId = await tests.create(fiveQuestions);
+			const otherTest = await tests.create({ ...fiveQuestions, title: 'Other' });
 			const first = await practiceRun(testId, [true, false]);
 			await tick();
 			const second = await repo.start('alice', testId, exam(3));
+			await repo.start('alice', otherTest, exam(1));
 			await repo.start('bob', testId, exam(1));
 
-			const history = await repo.history('alice');
+			const history = await repo.history('alice', testId);
 
 			expect(history.map((a) => [a.id, a.mode, a.finished, a.correct, a.total])).toEqual([
 				[second, 'exam', false, 0, 3],
@@ -427,18 +377,70 @@ describe('AttemptRepo', () => {
 			]);
 		});
 
-		it('reports the best finished score and the mistakes count per test', async () => {
+		it('redoes all questions in the same order and mode', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const source = await repo.start('alice', testId, practice(3));
+			const redoId = await repo.redo('alice', source, 'all');
+
+			expect(await asked(redoId!)).toEqual(await asked(source));
+			expect(await repo.get(redoId!, 'alice')).toMatchObject({
+				mode: 'practice',
+				finished: false,
+				answered: 0
+			});
+		});
+
+		it('keeps an exam’s time limit when redoing it', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const source = await repo.start('alice', testId, exam(2, 15));
+			await repo.finish(source);
+
+			const redo = await repo.get((await repo.redo('alice', source, 'all'))!, 'alice');
+
+			expect(redo?.mode).toBe('exam');
+			const minutesLeft = (redo!.deadlineAt!.getTime() - Date.now()) / 60_000;
+			expect(minutesLeft).toBeGreaterThan(14);
+			expect(minutesLeft).toBeLessThanOrEqual(15);
+		});
+
+		it('redoes only the wrong and unanswered questions, with feedback', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const source = await repo.start('alice', testId, exam(3));
+			await repo.saveExamAnswer(source, 0, (await answerIds(source, 0)).right);
+			await repo.saveExamAnswer(source, 1, [(await answerIds(source, 1)).wrong]);
+			await repo.finish(source); // Q3 left unanswered
+
+			const redoId = await repo.redo('alice', source, 'mistakes');
+
+			expect(await asked(redoId!)).toEqual(['Q2', 'Q3']);
+			expect((await repo.get(redoId!, 'alice'))?.mode).toBe('mistakes');
+			expect((await repo.currentQuestion(redoId!))?.text).toBe('Q2');
+		});
+
+		it('has nothing to redo without mistakes, or on someone else’s attempt', async () => {
+			const testId = await tests.create(fiveQuestions);
+			const perfect = await practiceRun(testId, [true, true]);
+
+			expect(await repo.redo('alice', perfect, 'mistakes')).toBeUndefined();
+			expect(await repo.redo('bob', perfect, 'all')).toBeUndefined();
+			expect(await repo.redo('alice', 'missing', 'all')).toBeUndefined();
+		});
+
+		it('reports the best finished practice or exam score per test', async () => {
 			const testId = await tests.create(fiveQuestions);
 			const otherId = await tests.create({ ...fiveQuestions, title: 'Other' });
-			await practiceRun(testId, [true, false, false, false]); //  25%
-			await practiceRun(testId, [true, true, true, false]); //    75%, latest: Q4 ✗ only
-			await repo.start('alice', testId, exam(5)); //              unfinished: ignored
-			await repo.start('alice', testId, { ...practice(1), mode: 'mistakes' }); // not a score
+			const weak = await practiceRun(testId, [true, false, false, false]); // 25%
+			await practiceRun(testId, [true, true, true, false]); //               75%
+			await repo.start('alice', testId, exam(5)); //                           unfinished
+			const redoId = await repo.redo('alice', weak, 'mistakes'); //            a redo isn't a score
+			for (const position of [0, 1, 2]) {
+				await repo.answer(redoId!, position, (await answerIds(redoId!, position)).right);
+			}
 
-			expect(await repo.statsByTest('alice')).toEqual({
-				[testId]: { bestPercent: 75, mistakes: 1 }
-			});
-			expect((await repo.statsByTest('alice'))[otherId]).toBeUndefined();
+			const stats = await repo.statsByTest('alice');
+
+			expect(stats).toEqual({ [testId]: { bestPercent: 75 } });
+			expect(stats[otherId]).toBeUndefined();
 		});
 	});
 });
