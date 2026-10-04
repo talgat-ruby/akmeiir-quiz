@@ -1,4 +1,5 @@
-import { redirect } from '@sveltejs/kit';
+import { error, redirect } from '@sveltejs/kit';
+import { m } from '#lib/paraglide/messages.js';
 
 const DEFAULT_AFTER_LOGIN = '/tests';
 
@@ -6,6 +7,13 @@ const DEFAULT_AFTER_LOGIN = '/tests';
 export function requireUser(locals: App.Locals): NonNullable<App.Locals['user']> {
 	if (!locals.user) redirect(303, '/login');
 	return locals.user;
+}
+
+/** The signed-in user if they are an admin; everyone else gets a 403. */
+export function requireAdmin(locals: App.Locals): NonNullable<App.Locals['user']> {
+	const user = requireUser(locals);
+	if (user.role !== 'admin') error(403, m.admin_only());
+	return user;
 }
 
 /**

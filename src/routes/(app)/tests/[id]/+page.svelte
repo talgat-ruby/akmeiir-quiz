@@ -32,7 +32,7 @@
 	</p>
 {/if}
 
-<form method="POST">
+<form method="POST" action="?/start">
 	<fieldset>
 		<legend>{m.setup_mode()}</legend>
 		<p>
@@ -109,3 +109,19 @@
 		{m.start_test()}
 	</button>
 </form>
+
+{#if data.user.isAdmin}
+	<form method="POST" action="?/delete">
+		<h2>{m.delete_test()}</h2>
+		<p>
+			<label>
+				<input type="checkbox" name="confirm" required />
+				{m.delete_confirm({ title: data.test.title })}
+			</label>
+		</p>
+		{#if form?.deleteMessage}
+			<p role="alert">{form.deleteMessage}</p>
+		{/if}
+		<p><button type="submit">{m.delete_test()}</button></p>
+	</form>
+{/if}

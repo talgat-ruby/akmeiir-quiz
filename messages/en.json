@@ -81,5 +81,17 @@
 	"history_in_progress": "in progress ({answered} of {total} answered)",
 	"mode_name_practice": "Practice",
 	"mode_name_exam": "Exam",
-	"mode_name_mistakes": "Mistakes"
+	"mode_name_mistakes": "Mistakes",
+	"admin_only": "Only admins can do this.",
+	"upload_link": "Upload a question set",
+	"upload_title": "Upload a question set",
+	"upload_help": "A JSON file in the question set format (docs/test-file-format.md), up to {max} MB. Uploaded sets are available to everyone.",
+	"upload_file_label": "File",
+	"upload_submit": "Upload",
+	"upload_no_file": "Choose a file to upload.",
+	"upload_too_large": "The file is too large. The limit is {max} MB.",
+	"upload_rejected": "{name} was not imported:",
+	"delete_test": "Delete this test",
+	"delete_confirm": "Yes, delete “{title}” and everyone’s attempts on it. This can’t be undone.",
+	"delete_confirm_required": "Tick the box to confirm."
 }

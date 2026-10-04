@@ -6,8 +6,11 @@ import { asc, eq } from 'drizzle-orm';
 import { drizzle, type LibSQLDatabase } from 'drizzle-orm/libsql';
 import { migrate } from 'drizzle-orm/libsql/migrator';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AttemptRepo } from './attempt-repo.ts';
+import { attempt, attemptQuestion } from './attempts.schema.ts';
+import { user } from './auth.schema.ts';
 import { TestRepo, type NewTest } from './test-repo.ts';
-import { answer, question } from './tests.schema.ts';
+import { answer, question, test } from './tests.schema.ts';
 
 const sample = (title: string, questionCount = 2): NewTest => ({
 	title,
@@ -109,5 +112,46 @@ describe('TestRepo', () => {
 
 		await expect(repo.create(broken)).rejects.toThrow();
 		expect(await repo.list()).toEqual([]);
+	});
+
+	it('deletes a test with its questions, answers and everyone’s attempts', async () => {
+		await db.insert(user).values({ id: 'alice', name: 'Alice', email: 'alice@example.com' });
+		const attempts = new AttemptRepo(db);
+		const doomed = await repo.create(sample('Doomed'));
+		const kept = await repo.create(sample('Kept'));
+		for (const testId of [doomed, kept]) {
+			await attempts.start('alice', testId, {
+				questionCount: 2,
+				random: false,
+				mode: 'practice',
+				timeLimitMinutes: null
+			});
+		}
+		const rows = async () => ({
+			tests: (await db.select().from(test)).length,
+			questions: (await db.select().from(question)).length,
+			answers: (await db.select().from(answer)).length,
+			attempts: (await db.select().from(attempt)).length,
+			attemptQuestions: (await db.select().from(attemptQuestion)).length
+		});
+		expect(await rows()).toEqual({
+			tests: 2,
+			questions: 4,
+			answers: 8,
+			attempts: 2,
+			attemptQuestions: 4
+		});
+
+		expect(await repo.delete(doomed)).toBe(true);
+
+		expect(await rows()).toEqual({
+			tests: 1,
+			questions: 2,
+			answers: 4,
+			attempts: 1,
+			attemptQuestions: 2
+		});
+		expect((await repo.list()).map((t) => t.id)).toEqual([kept]);
+		expect(await repo.delete(doomed)).toBe(false);
 	});
 });

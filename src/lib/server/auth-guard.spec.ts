@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { afterLoginUrl, isPublicRoute, loginUrl } from './auth-guard.ts';
+import { afterLoginUrl, isPublicRoute, loginUrl, requireAdmin } from './auth-guard.ts';
 
 describe('isPublicRoute', () => {
 	it('allows the (auth) pages and unknown URLs', () => {
@@ -37,5 +37,30 @@ describe('afterLoginUrl', () => {
 		for (const target of [null, '', 'tests', 'https://evil.example', '//evil.example', '/\\evil']) {
 			expect(afterLoginUrl(target)).toBe('/tests');
 		}
+	});
+});
+
+describe('requireAdmin', () => {
+	const locals = (role?: string) =>
+		(role === undefined ? {} : { user: { id: 'u1', role } }) as unknown as App.Locals;
+	const thrown = (fn: () => unknown) => {
+		try {
+			fn();
+		} catch (e) {
+			return e as { status?: number; location?: string };
+		}
+		return undefined;
+	};
+
+	it('lets admins through', () => {
+		expect(requireAdmin(locals('admin')).id).toBe('u1');
+	});
+
+	it('refuses other users with 403', () => {
+		expect(thrown(() => requireAdmin(locals('user')))?.status).toBe(403);
+	});
+
+	it('sends anonymous users to log in', () => {
+		expect(thrown(() => requireAdmin(locals()))).toMatchObject({ status: 303, location: '/login' });
 	});
 });

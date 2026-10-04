@@ -11,6 +11,10 @@
 
 <h1 class="mb-4 text-2xl font-bold">{m.tests_title()}</h1>
 
+{#if data.user.isAdmin}
+	<p><a href={resolve('/(app)/tests/upload')}>{m.upload_link()}</a></p>
+{/if}
+
 {#if data.tests.length === 0}
 	<p class="rounded-xl border border-dashed border-gray-300 p-6 text-center text-gray-500">
 		{m.tests_empty()}

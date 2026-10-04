@@ -1,6 +1,6 @@
 import { error, fail, redirect } from '@sveltejs/kit';
 import { m } from '#lib/paraglide/messages.js';
-import { requireUser } from '#lib/server/auth-guard.ts';
+import { requireAdmin, requireUser } from '#lib/server/auth-guard.ts';
 import { attemptRepo, testRepo, type AttemptMode } from '#lib/server/db/index.ts';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -28,7 +28,7 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 export const actions: Actions = {
 	// The setup form: mode, time limit (exam only), how many questions, random or in order.
 	// Mistakes mode asks at most the user's current mistakes.
-	default: async ({ params, locals, request }) => {
+	start: async ({ params, locals, request }) => {
 		const user = requireUser(locals);
 		const test = await testRepo.get(params.id);
 		if (!test) error(404, m.test_not_found());
@@ -79,5 +79,15 @@ export const actions: Actions = {
 			timeLimitMinutes
 		});
 		redirect(303, `/attempts/${attemptId}`);
+	},
+
+	// Admins only: delete the test together with everyone's attempts on it.
+	delete: async ({ params, locals, request }) => {
+		requireAdmin(locals);
+		if ((await request.formData()).get('confirm') !== 'on') {
+			return fail(400, { deleteMessage: m.delete_confirm_required() });
+		}
+		await testRepo.delete(params.id);
+		redirect(303, '/tests');
 	}
 };
