@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import { m } from '#lib/paraglide/messages.js';
+	import { getLocale } from '#lib/paraglide/runtime.js';
 
 	let { data, form } = $props();
 
@@ -9,7 +10,7 @@
 		exam: m.mode_name_exam,
 		mistakes: m.mode_name_mistakes
 	};
-	const when = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+	const when = new Intl.DateTimeFormat(getLocale(), { dateStyle: 'medium', timeStyle: 'short' });
 	const percent = (correct: number, total: number) =>
 		total ? Math.round((correct / total) * 100) : 0;
 </script>

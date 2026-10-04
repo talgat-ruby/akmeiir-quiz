@@ -1,0 +1,22 @@
+{
+	"title": "Geography (e2e)",
+	"description": "Uploaded by the e2e tests.",
+	"questions": [
+		{
+			"text": "What is the capital of Kazakhstan?",
+			"answers": [
+				{ "text": "Astana", "correct": true },
+				{ "text": "Almaty" },
+				{ "text": "Shymkent" }
+			]
+		},
+		{
+			"text": "Which of these are rivers?",
+			"answers": [
+				{ "text": "Irtysh", "correct": true },
+				{ "text": "Ural", "correct": true },
+				{ "text": "Balkhash" }
+			]
+		}
+	]
+}

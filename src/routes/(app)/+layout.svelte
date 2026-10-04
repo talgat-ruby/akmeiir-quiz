@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
+	import LocaleSwitcher from '#lib/components/LocaleSwitcher.svelte';
 	import { m } from '#lib/paraglide/messages.js';
 
 	let { data, children } = $props();
@@ -32,6 +33,7 @@
 			</div>
 		</div>
 	</header>
+	<LocaleSwitcher />
 
 	<main class="mx-auto max-w-2xl px-4 py-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
 		{@render children()}

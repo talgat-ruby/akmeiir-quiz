@@ -95,5 +95,6 @@
 	"history_open": "Open",
 	"redo_all": "Redo all",
 	"redo_mistakes": "Redo mistakes ({count})",
-	"redo_nothing": "There is nothing to redo in this attempt."
+	"redo_nothing": "There is nothing to redo in this attempt.",
+	"language": "Language"
 }

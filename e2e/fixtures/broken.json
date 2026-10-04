@@ -1,0 +1,7 @@
+{
+	"title": "Broken",
+	"questions": [
+		{ "text": "Typo", "answers": [{ "text": "A", "corect": true }, { "text": "B" }] },
+		{ "text": "Too few answers", "answers": [{ "text": "A", "correct": true }] }
+	]
+}
